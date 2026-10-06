@@ -76,8 +76,8 @@ canvas{width:100%;display:block}
 #rec .btn{background:#120d09;border-color:#3a281a;color:#b8865a}
 #blackout{position:fixed;inset:0;background:#000;z-index:60;display:flex;align-items:flex-end;justify-content:center;padding-bottom:calc(30px + env(safe-area-inset-bottom,0px));color:#1b130c;font-size:.8rem}
 .warn{color:#d08a5a;font-size:.85rem;max-width:340px}
-.holdbtn{position:relative;overflow:hidden}
-.holdbtn i{position:absolute;inset:0;background:#3a2414;transform-origin:left;transform:scaleX(0);z-index:-1}
+#stopBtn{padding:16px;font-size:1.05rem;border:1.5px solid #8a5a32!important;color:#e0a46a!important;background:#1c130b!important;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+#stopBtn.armed{background:#8a5a32!important;color:#140d07!important}
 
 /* Journal */
 .night{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;text-align:left;width:100%}
@@ -200,7 +200,7 @@ nav button[aria-current=page]{color:var(--moon)}
   </div>
   <div style="display:flex;flex-direction:column;gap:12px;align-items:center;width:100%">
     <button class="btn" id="blackBtn" style="width:min(320px,100%)">Écran noir</button>
-    <button class="btn holdbtn" id="stopBtn" style="width:min(320px,100%)"><i id="holdFill"></i>Maintenir pour terminer la nuit</button>
+    <button type="button" class="btn" id="stopBtn" style="width:min(320px,100%)">Terminer la nuit</button>
   </div>
 </div>
 <div id="blackout" hidden>Toucher deux fois pour afficher</div>
@@ -759,11 +759,13 @@ document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>show(b.dataset.
 $("#startBtn").onclick=startNight;
 $("#blackBtn").onclick=()=>{$("#blackout").hidden=false};
 let lastTap=0; $("#blackout").addEventListener("click",()=>{const n=Date.now();if(n-lastTap<400){$("#blackout").hidden=true;setTimeout(()=>{if(S)$("#blackout").hidden=false},60000)}lastTap=n});
-(function(){const b=$("#stopBtn"),fill=$("#holdFill");let t=null,start=0,raf=0;
-  const down=e=>{e.preventDefault();start=Date.now();const step=()=>{const p=Math.min(1,(Date.now()-start)/1500);fill.style.transform="scaleX("+p+")";if(p>=1){up();stopNight();return}raf=requestAnimationFrame(step)};raf=requestAnimationFrame(step)};
-  const up=()=>{cancelAnimationFrame(raf);fill.style.transform="scaleX(0)"};
-  b.addEventListener("pointerdown",down);["pointerup","pointerleave","pointercancel"].forEach(ev=>b.addEventListener(ev,up));
-  b.addEventListener("keydown",e=>{if(e.key==="Enter"&&e.repeat===false){stopNight()}});
+/* Arrêt en deux appuis : le premier arme le bouton 5 s, le second termine la nuit */
+(function(){const b=$("#stopBtn");let timer=null;
+  const disarm=()=>{clearTimeout(timer);timer=null;b.classList.remove("armed");b.textContent="Terminer la nuit"};
+  b.addEventListener("click",()=>{
+    if(b.classList.contains("armed")){disarm();b.disabled=true;b.textContent="Enregistrement de la nuit…";stopNight().finally(()=>{b.disabled=false;disarm()});return}
+    b.classList.add("armed");b.textContent="Toucher encore pour confirmer";timer=setTimeout(disarm,5000);
+  });
 })();
 
 /* Reprise après un rechargement en pleine nuit */
