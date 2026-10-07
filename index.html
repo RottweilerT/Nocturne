@@ -102,6 +102,14 @@ nav .in{display:grid;grid-template-columns:repeat(4,1fr);width:100%;max-width:62
 nav button{background:none;border:0;padding:8px 4px;color:var(--muted);font-size:.8rem;display:flex;flex-direction:column;align-items:center;gap:3px}
 nav button svg{width:22px;height:22px}
 nav button[aria-current=page]{color:var(--moon)}
+.clip{display:flex;flex-direction:column;gap:8px;padding:10px 12px;background:var(--panel2);border-radius:10px;min-width:0}
+.clip audio{width:100%;height:36px;min-width:0}
+.btn.sm{padding:6px 11px;font-size:.85rem;background:var(--panel)}
+.btn.armed{background:var(--danger)!important;color:#1a0b08!important;border-color:var(--danger)!important}
+.yearwrap{display:grid;grid-template-columns:36px minmax(0,1fr);align-items:start}
+#cvYearAxis{width:36px}
+.weekrow{display:grid;grid-template-columns:1fr auto auto;gap:14px;font-size:.88rem;padding:4px 0;border-bottom:1px solid var(--line)}
+.weekrow:last-child{border-bottom:0}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(90px + env(safe-area-inset-bottom,0px));background:var(--panel2);border:1px solid var(--line);padding:10px 16px;border-radius:10px;z-index:70;font-size:.9rem;max-width:90vw}
 @media (max-width:420px){.grid3{grid-template-columns:repeat(2,minmax(0,1fr))}h1{font-size:1.6rem}#rec .clock{font-size:2.6rem}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
@@ -401,7 +409,7 @@ async function saveClip(rec){
   const blob=new Blob(rec.chunks,{type:rec.r.mimeType||A?.mime||"audio/webm"});
   if(!blob.size||!S) return;
   const type=rec.types.includes("parole")?"parole":rec.types.includes("ronflement")?"ronflement":(rec.types[0]||"bruit");
-  await put("clips",{id:rec.id,nightId:S.id,t:rec.t,type,blob,mime:blob.type}).catch(()=>{});
+  await put("clips",{id:rec.id,nightId:S.id,t:rec.t,dur:Math.round((Date.now()-rec.t)/1000),type,blob,mime:blob.type}).catch(()=>{});
 }
 function endEvent(tEnd){
   const ev=A.ev; A.ev=null; ev.dur=Math.max(0.2,(tEnd-ev.t)/1000);
@@ -546,10 +554,15 @@ function drawBars(cv,items,opt){
   const {g,w,h}=setupCanvas(cv,opt.h||180); const L=30,R=6,T=10,B=24,pw=w-L-R,ph=h-T-B;
   const max=opt.max??Math.max(...items.map(i=>i.v),1); const y=v=>T+ph-(v/max)*ph; const bw=pw/Math.max(items.length,1);
   g.font="10px "+cssVar("--mono");g.fillStyle=cssVar("--muted");g.textBaseline="middle";
-  for(const tk of opt.ticks){g.fillStyle=cssVar("--line");g.fillRect(L,Math.round(y(tk))+.5,pw,1);g.fillStyle=cssVar("--muted");g.fillText(String(tk),2,y(tk))}
+  for(const tk of opt.ticks){g.fillStyle=cssVar("--line");g.fillRect(L,Math.round(y(tk))+.5,pw,1);g.fillStyle=cssVar("--muted");g.fillText(opt.fmt?opt.fmt(tk):String(tk),2,y(tk))}
   if(opt.band){g.fillStyle="rgba(124,196,154,.12)";g.fillRect(L,y(opt.band[1]),pw,y(opt.band[0])-y(opt.band[1]))}
-  items.forEach((it,i)=>{if(it.v==null)return;const X=L+i*bw+bw*.18,W=bw*.64;g.fillStyle=it.c||cssVar("--moon");g.fillRect(X,y(it.v),W,T+ph-y(it.v));
-    if(items.length<=16){g.fillStyle=cssVar("--muted");g.textBaseline="top";g.fillText(it.l,X+W/2-g.measureText(it.l).width/2,T+ph+6);g.textBaseline="middle"}});
+  items.forEach((it,i)=>{const X=L+i*bw+bw*.18,W=bw*.64;
+    if(it.v!=null){g.fillStyle=it.c||cssVar("--moon");g.fillRect(X,y(it.v),W,T+ph-y(it.v))}
+    else{g.fillStyle=cssVar("--muted");g.textBaseline="bottom";g.fillText("–",X+W/2-3,T+ph-2)}
+    const every=Math.max(1,Math.ceil(items.length*36/pw));
+    if(items.length<=16&&(items.length-1-i)%every===0){g.fillStyle=cssVar("--muted");g.textBaseline="top";const lw=g.measureText(it.l).width;g.fillText(it.l,Math.max(L,Math.min(X+W/2-lw/2,w-R-lw)),T+ph+6)}
+    g.textBaseline="middle"});
+  if(opt.line!=null){g.strokeStyle=cssVar("--good");g.setLineDash([4,4]);g.lineWidth=1.5;g.beginPath();g.moveTo(L,y(opt.line));g.lineTo(L+pw,y(opt.line));g.stroke();g.setLineDash([])}
   if(items.length>16){g.fillStyle=cssVar("--muted");g.textBaseline="top";[0,items.length-1].forEach(i=>{const it=items[i];const X=L+i*bw+bw/2-g.measureText(it.l).width/2;g.fillText(it.l,Math.max(L,Math.min(X,w-R-g.measureText(it.l).width)),T+ph+6)})}
 }
 
@@ -589,13 +602,14 @@ async function renderJournal(){
 }
 
 function openSheet(html){$("#sheetBody").innerHTML=html;$("#sheet").hidden=false;$("#sheetBody").scrollTop=0}
-function closeSheet(){$("#sheet").hidden=true;document.querySelectorAll("#sheetBody audio").forEach(a=>{a.pause();URL.revokeObjectURL(a.src)})}
+function closeSheet(){$("#sheet").hidden=true;revokeAudios()}
 $("#sheet").addEventListener("click",e=>{if(e.target.id==="sheet")closeSheet()});
 
 async function openNight(id){
   const n=await get("nights",id); if(!n)return; const ns=await nights(); const sc=nightScore(n,ns), w=sleepWindow(n), co=counts(n.events);
   const clips=await clipsOf(id).catch(()=>[]); const clipMap=Object.fromEntries(clips.map(c=>[c.id,c]));
-  const talkEv=n.events.filter(e=>e.type==="parole"); const snoreMin=new Set(n.events.filter(e=>e.type==="ronflement").map(e=>Math.floor(e.t/60000))).size;
+  const sorted=clips.slice().sort((a,b)=>a.t-b.t);
+  const talkNoClip=n.events.filter(e=>e.type==="parole"&&!(e.clip&&clipMap[e.clip])).length; const snoreMin=new Set(n.events.filter(e=>e.type==="ronflement").map(e=>Math.floor(e.t/60000))).size;
   const f=n.form||{};
   openSheet(`
   <div class="row between"><div><p class="label">Nuit du</p><h2 style="text-transform:capitalize">${esc(dayLabel(n.start))}</h2></div><button class="btn" id="closeS">Fermer</button></div>
@@ -625,21 +639,63 @@ async function openNight(id){
       ${f.dreams?`<p class="small"><span class="muted">Rêves :</span> ${esc(f.dreams)}</p>`:""}
       ${f.note?`<p class="small"><span class="muted">Note :</span> ${esc(f.note)}</p>`:""}`:`<p class="muted small">Pas encore renseigné.</p>`}
   </div>
-  <div class="panel"><h3>Ce que tu as dit pendant la nuit</h3>
-    ${talkEv.length?`<div class="evlist">${talkEv.map(e=>evRow(e,clipMap)).join("")}</div>`:`<p class="muted small">Aucun épisode de parole détecté.</p>`}
-  </div>
-  <div class="panel"><h3>Autres extraits</h3>
-    ${(()=>{const other=clips.filter(c=>c.type!=="parole").sort((a,b)=>a.t-b.t);return other.length?`<div class="evlist">${other.map(c=>clipRow(c)).join("")}</div>`:`<p class="muted small">Aucun extrait.</p>`})()}
+  <div class="panel" id="clipPanel"><h3>Extraits audio <span class="muted small num">(${sorted.length})</span></h3>
+    ${sorted.length?`<div class="row" role="group" aria-label="Filtrer les extraits">
+        <button type="button" class="chip" data-filter="all" aria-pressed="true">Tous</button>
+        ${Object.keys(TYPES).filter(k=>sorted.some(c=>c.type===k)).map(k=>`<button type="button" class="chip" data-filter="${k}" aria-pressed="false"><span class="dot ${TYPES[k].cls}"></span>${TYPES[k].l}</button>`).join("")}
+      </div>
+      <div class="evlist">${sorted.map((c,i)=>clipRow(c,i,n)).join("")}</div>
+      ${sorted.length>1?`<button type="button" class="btn danger" data-act="all">Supprimer tous les extraits de cette nuit</button>`:""}`
+    :`<p class="muted small">Aucun extrait pour cette nuit.</p>`}
+    ${talkNoClip?`<p class="muted small">${talkNoClip} épisode(s) de parole détecté(s) sans extrait audio.</p>`:""}
   </div>
   <div class="row"><button class="btn danger" id="delNight">Supprimer cette nuit</button></div>`);
   requestAnimationFrame(()=>drawNight($("#nightCv"),n));
   $("#closeS").onclick=closeSheet; $("#editForm").onclick=()=>openForm(n);
   const dn=$("#delNight"); dn.onclick=async()=>{if(dn.dataset.armed){await del("nights",id);for(const c of clips)await del("clips",c.id);closeSheet();renderJournal();toast("Nuit supprimée")}else{dn.dataset.armed=1;dn.textContent="Toucher encore pour confirmer"}};
   document.querySelectorAll("#sheetBody audio[data-clip]").forEach(a=>{const c=clipMap[a.dataset.clip];if(c)a.src=URL.createObjectURL(c.blob)});
+  const panel=$("#clipPanel");
+  panel.addEventListener("click",async e=>{
+    const f=e.target.closest("[data-filter]");
+    if(f){panel.querySelectorAll("[data-filter]").forEach(x=>x.setAttribute("aria-pressed",x===f));
+      panel.querySelectorAll(".clip").forEach(c=>c.hidden=f.dataset.filter!=="all"&&c.dataset.type!==f.dataset.filter);return}
+    const b=e.target.closest("[data-act]"); if(!b)return;
+    let ids=[], msg="";
+    if(b.dataset.act==="all"){if(!armBtn(b,"Toucher encore : supprimer les "+sorted.length+" extraits"))return;ids=sorted.map(c=>c.id);msg=ids.length+" extraits supprimés"}
+    else{const id=b.closest(".clip").dataset.id;
+      if(b.dataset.act==="del"){if(!armBtn(b,"Confirmer la suppression"))return;ids=[id];msg="Extrait supprimé"}
+      else{ids=sorted.filter(c=>c.id!==id).map(c=>c.id);if(!ids.length){toast("C'est déjà le seul extrait de la nuit");return}
+        if(!armBtn(b,"Toucher encore : supprimer les "+ids.length+" autres"))return;msg=ids.length+" extrait"+(ids.length>1?"s":"")+" supprimé"+(ids.length>1?"s":"")}}
+    await removeClips(n,ids); toast(msg);
+    const st=$("#sheetBody").scrollTop; revokeAudios(); await openNight(id); $("#sheetBody").scrollTop=st;
+  });
 }
-function evRow(e,clipMap){const c=e.clip&&clipMap[e.clip];
-  return `<div class="ev"><span class="dot d-talk"></span><span class="num small">${hm(e.t)} · ${e.dur}s</span>${c?`<audio controls preload="none" data-clip="${c.id}"></audio>`:`<span class="muted small">sans extrait</span>`}</div>`}
-function clipRow(c){return `<div class="ev"><span class="dot ${TYPES[c.type]?.cls||"d-noise"}"></span><span class="num small">${hm(c.t)} · ${esc(TYPES[c.type]?.l||c.type)}</span><audio controls preload="none" data-clip="${c.id}"></audio></div>`}
+/* Premier appui : le bouton demande confirmation pendant 5 s. Renvoie true au second appui. */
+function armBtn(btn,label){
+  if(btn.classList.contains("armed"))return true;
+  document.querySelectorAll("#sheetBody .armed").forEach(x=>{x.classList.remove("armed");x.textContent=x.dataset.orig});
+  btn.dataset.orig=btn.textContent;btn.classList.add("armed");btn.textContent=label;
+  setTimeout(()=>{if(btn.isConnected&&btn.classList.contains("armed")){btn.classList.remove("armed");btn.textContent=btn.dataset.orig}},5000);
+  return false;
+}
+async function removeClips(n,ids){
+  for(const id of ids) await del("clips",id).catch(()=>{});
+  for(const e of n.events||[]) if(e.clip&&ids.includes(e.clip)) delete e.clip;
+  await put("nights",n).catch(()=>{});
+}
+function revokeAudios(){document.querySelectorAll("#sheetBody audio").forEach(a=>{a.pause();if(a.src)URL.revokeObjectURL(a.src)})}
+/* durée d'un extrait : mesurée à l'enregistrement, ou estimée à partir des événements qu'il couvre */
+function clipDur(c,n){
+  if(c.dur)return c.dur;
+  const ev=(n.events||[]).filter(e=>e.clip===c.id); if(!ev.length)return null;
+  return Math.round((Math.max(...ev.map(e=>e.t+e.dur*1000))-c.t)/1000+2.5);
+}
+function clipRow(c,i,n){const T=TYPES[c.type]||TYPES.bruit, d=clipDur(c,n);
+  return `<div class="clip" data-id="${c.id}" data-type="${esc(c.type)}">
+    <div class="row between small"><span class="row" style="gap:8px"><span class="dot ${T.cls}"></span><b style="font-weight:500">${T.l}</b><span class="num muted">${hm(c.t)}${d?` · ≈ ${d} s`:""}</span></span><span class="num muted">n° ${i+1}</span></div>
+    <audio controls preload="none" data-clip="${c.id}"></audio>
+    <div class="row"><button type="button" class="btn sm" data-act="del">Supprimer</button><button type="button" class="btn sm" data-act="only">Ne garder que celui-ci</button></div>
+  </div>`}
 
 /* Questionnaire du matin */
 function openForm(n){
@@ -680,13 +736,102 @@ function openForm(n){
 /* Tendances */
 let RANGE=14;
 document.querySelectorAll("[data-range]").forEach(b=>b.onclick=()=>{RANGE=+b.dataset.range;document.querySelectorAll("[data-range]").forEach(x=>x.setAttribute("aria-pressed",x===b));renderTrends()});
+/* ---- Analyse par nuit calendaire ---- */
+/* Une nuit appartient au jour où elle commence : coucher à 1 h le mercredi = nuit du mardi */
+function nightKey(t){const d=new Date(t-12*3600e3);d.setHours(0,0,0,0);return d.getTime()}
+function shiftDay(key,n){const d=new Date(key);d.setDate(d.getDate()+n);d.setHours(0,0,0,0);return d.getTime()}
+function sleepByNight(allN){const m=new Map();for(const n of allN){const k=nightKey(n.start);m.set(k,(m.get(k)||0)+sleepWindow(n).dur/3600e3)}return m}
+function lastNightKey(map){const now=Date.now();let k=nightKey(now);if(!map.has(k)&&new Date(now).getHours()>=12)k=shiftDay(k,-1);return k}
+/* Dette nette : somme des écarts à l'objectif sur les nuits enregistrées ; une nuit plus longue rembourse une partie */
+function weekDebt(map,endKey,target){
+  const days=[];for(let i=6;i>=0;i--){const k=shiftDay(endKey,-i);days.push({k,h:map.has(k)?map.get(k):null})}
+  const rec=days.filter(d=>d.h!=null); const bal=rec.reduce((s,d)=>s+d.h-target,0);
+  return {days,rec:rec.length,debt:Math.max(0,-bal),bal,avg:rec.length?mean(rec.map(d=>d.h)):null};
+}
+const fmtH=h=>hmm(h*3600e3);
+const signedH=h=>(h<0?"−":"+")+fmtH(Math.abs(h));
+const cap=s=>s.charAt(0).toUpperCase()+s.slice(1);
+
+function weekHtml(map){
+  const end=lastNightKey(map), w=weekDebt(map,end,CFG.target), prev=weekDebt(map,shiftDay(end,-7),CFG.target);
+  const col=w.debt<1?"var(--good)":w.debt<4?"var(--moon)":"var(--danger)";
+  return {w,html:`<div class="panel">
+    <h3>Dette de sommeil · 7 dernières nuits</h3>
+    <div class="grid3">
+      <div class="stat"><span class="label">Dette</span><b style="color:${col}">${w.rec?fmtH(w.debt):"–"}</b></div>
+      <div class="stat"><span class="label">Moyenne / nuit</span><b>${w.avg!=null?fmtH(w.avg):"–"}</b></div>
+      <div class="stat"><span class="label">Nuits suivies</span><b>${w.rec}/7</b></div>
+    </div>
+    <div class="chart"><canvas id="cvWeek" role="img" aria-label="Heures dormies sur les 7 dernières nuits"></canvas></div>
+    <div>${w.days.slice().reverse().map(d=>`<div class="weekrow"><span>${cap(new Date(d.k).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"short"}))}</span>
+      <span class="num">${d.h!=null?fmtH(d.h):"<span class='muted'>non suivie</span>"}</span>
+      <span class="num" style="min-width:76px;text-align:right;color:${d.h==null?"var(--muted)":d.h<CFG.target?"var(--danger)":"var(--good)"}">${d.h!=null?signedH(d.h-CFG.target):""}</span></div>`).join("")}</div>
+    <p class="muted small">Chaque nuit sous ton objectif de ${String(CFG.target).replace(".",",")} h ajoute à la dette ; une nuit plus longue en rembourse une partie. Les nuits non suivies ne comptent pas.${prev.rec?` Semaine précédente : ${fmtH(prev.debt)} de dette sur ${prev.rec} nuit${prev.rec>1?"s":""}.`:""}</p>
+  </div>`};
+}
+
+function yearDays(map){const end=lastNightKey(map);const out=[];for(let i=364;i>=0;i--){const k=shiftDay(end,-i);out.push({k,h:map.has(k)?map.get(k):null})}return out}
+function yearHtml(days){
+  const rec=days.filter(d=>d.h!=null); if(!rec.length)return "";
+  const best=rec.reduce((a,b)=>b.h>a.h?b:a), worst=rec.reduce((a,b)=>b.h<a.h?b:a);
+  const dd=k=>new Date(k).toLocaleDateString("fr-FR",{day:"numeric",month:"short"});
+  return `<div class="panel">
+    <div class="row between"><h3>Ton année de sommeil</h3><span class="muted small">12 derniers mois</span></div>
+    <div class="grid2">
+      <div class="stat"><span class="label">Moyenne</span><b>${fmtH(mean(rec.map(d=>d.h)))}</b></div>
+      <div class="stat"><span class="label">Nuits suivies</span><b>${rec.length}</b></div>
+      <div class="stat"><span class="label">Plus longue · ${dd(best.k)}</span><b>${fmtH(best.h)}</b></div>
+      <div class="stat"><span class="label">Plus courte · ${dd(worst.k)}</span><b>${fmtH(worst.h)}</b></div>
+    </div>
+    <div class="yearwrap"><canvas id="cvYearAxis" aria-hidden="true"></canvas><div class="chart" id="yearScroll"><canvas id="cvYear" role="img" aria-label="Heures dormies chaque nuit sur 12 mois"></canvas></div></div>
+    <p class="small num" id="yearRead">Touche une barre pour voir le détail de la nuit.</p>
+    <div class="legend"><span><span class="dot" style="background:var(--moon)"></span>heures dormies</span><span><span class="dot" style="background:var(--danger)"></span>sous l'objectif</span><span><span class="dot" style="background:var(--fg)"></span>moyenne sur 7 nuits</span><span><span class="dot" style="background:var(--good)"></span>objectif ${String(CFG.target).replace(".",",")} h</span></div>
+  </div>`;
+}
+const YEAR_H=210, YEAR_T=10, YEAR_B=26, YEAR_MAX=12;
+function drawYear(days,sel){
+  const cv=$("#cvYear"), ax=$("#cvYearAxis"), sc=$("#yearScroll"); if(!cv)return;
+  const bw=3, W=Math.max(sc.clientWidth,days.length*bw);
+  cv.style.width=W+"px";
+  const {g,w,h}=setupCanvas(cv,YEAR_H), ph=h-YEAR_T-YEAR_B, y=v=>YEAR_T+ph-(Math.min(v,YEAR_MAX)/YEAR_MAX)*ph, bwr=w/days.length;
+  const ticks=[0,2,4,6,8,10,12];
+  for(const t of ticks){g.fillStyle=cssVar("--line");g.fillRect(0,Math.round(y(t))+.5,w,1)}
+  // mois
+  g.font="10px "+cssVar("--mono");g.textBaseline="top";
+  days.forEach((d,i)=>{const dt=new Date(d.k);if(dt.getDate()===1){const X=i*bwr;g.fillStyle=cssVar("--line");g.fillRect(X,YEAR_T,1,ph);
+    g.fillStyle=cssVar("--muted");g.fillText(dt.toLocaleDateString("fr-FR",{month:"short"})+(dt.getMonth()===0?" "+dt.getFullYear():""),X+3,YEAR_T+ph+7)}});
+  // barres
+  days.forEach((d,i)=>{if(d.h==null)return;g.fillStyle=d.h<CFG.target-0.5?cssVar("--danger"):cssVar("--moon");g.fillRect(i*bwr,y(d.h),Math.max(1,bwr-1),YEAR_T+ph-y(d.h))});
+  // objectif
+  g.strokeStyle=cssVar("--good");g.setLineDash([4,4]);g.lineWidth=1.2;g.beginPath();g.moveTo(0,y(CFG.target));g.lineTo(w,y(CFG.target));g.stroke();g.setLineDash([]);
+  // moyenne glissante sur 7 jours (au moins 3 nuits suivies dans la fenêtre)
+  g.strokeStyle=cssVar("--fg");g.lineWidth=1.6;g.beginPath();let pen=false;
+  days.forEach((d,i)=>{const win=days.slice(Math.max(0,i-6),i+1).filter(x=>x.h!=null);
+    if(win.length>=3){const X=i*bwr+bwr/2,Y=y(mean(win.map(x=>x.h)));pen?g.lineTo(X,Y):g.moveTo(X,Y);pen=true}else pen=false});
+  g.stroke();
+  if(sel!=null){g.strokeStyle=cssVar("--fg");g.lineWidth=1;g.strokeRect(sel*bwr-1.5,YEAR_T,bwr+2,ph)}
+  // axe des heures, fixe à gauche
+  const a=setupCanvas(ax,YEAR_H); a.g.font="10px "+cssVar("--mono");a.g.fillStyle=cssVar("--muted");a.g.textBaseline="middle";
+  for(const t of ticks)a.g.fillText(t+" h",2,y(t));
+  cv.onclick=e=>{const r=cv.getBoundingClientRect();const i=Math.max(0,Math.min(days.length-1,Math.floor((e.clientX-r.left)/bwr)));
+    const d=days[i];$("#yearRead").textContent=cap(dayLabel(d.k))+" : "+(d.h!=null?fmtH(d.h)+" dormies ("+signedH(d.h-CFG.target)+" par rapport à l'objectif)":"nuit non suivie");drawYear(days,i)};
+}
+
 async function renderTrends(){
   const allN=await nights(); const ns=allN.slice(-RANGE); const box=$("#trendBody");
-  if(ns.length<2){box.innerHTML="<div class='panel'><p class='muted'>Les tendances apparaissent à partir de deux nuits enregistrées. Il en faut une dizaine pour que les comparaisons aient du sens.</p></div>";return}
+  if(!allN.length){box.innerHTML="<div class='panel'><p class='muted'>Les analyses apparaissent après ta première nuit enregistrée.</p></div>";return}
+  const map=sleepByNight(allN), wk=weekHtml(map), days=yearDays(map);
+  const head=wk.html+yearHtml(days);
+  const drawHead=()=>requestAnimationFrame(()=>{
+    drawBars($("#cvWeek"),wk.w.days.map(d=>({v:d.h,l:new Date(d.k).toLocaleDateString("fr-FR",{weekday:"short"}).replace(".",""),c:d.h!=null&&d.h<CFG.target?cssVar("--danger"):cssVar("--moon")})),
+      {max:Math.max(10,Math.ceil(Math.max(0,...wk.w.days.map(d=>d.h||0)))),ticks:[0,4,8],fmt:t=>t+" h",line:CFG.target,h:150});
+    drawYear(days); const s=$("#yearScroll"); if(s)s.scrollLeft=s.scrollWidth;
+  });
+  if(ns.length<2){box.innerHTML=head+"<div class='panel'><p class='muted'>Les autres tendances (score, régularité, ronflement, habitudes) apparaissent à partir de deux nuits enregistrées.</p></div>";drawHead();return}
   const ws=ns.map(sleepWindow), durs=ws.map(w=>w.dur/3600e3), scs=ns.map(n=>nightScore(n,allN).total);
   const beds=ns.map(n=>bedMinutes(n.start)), bedSd=sd(beds);
   const avgBed=mean(beds)%(24*60); const bedStr=pad(Math.floor(avgBed/60)%24)+":"+pad(Math.round(avgBed%60));
-  const last7=durs.slice(-7); const debt=last7.reduce((s,d)=>s+Math.max(0,CFG.target-d),0);
+  const debt=wk.w.debt;
   const snoreMins=ns.map(n=>new Set(n.events.filter(e=>e.type==="ronflement").map(e=>Math.floor(e.t/60000))).size);
   const talks=ns.map(n=>counts(n.events).parole);
   const quals=ns.filter(n=>n.form).map(n=>n.form.quality);
@@ -705,15 +850,16 @@ async function renderTrends(){
   const snoreNights=snoreMins.filter(m=>m>=30).length;
   if(snoreNights>=Math.max(3,ns.length*0.5)) ins.push(["Ronflement notable (30 min ou plus) sur "+snoreNights+" nuits sur "+ns.length+". Si c'est fort, quotidien, ou accompagné de fatigue en journée ou de pauses respiratoires remarquées, parles-en à un médecin : cela peut signaler une apnée du sommeil.",1]);
   if(talks.some(t=>t>0)) ins.push(["Somniloquie détectée sur "+talks.filter(t=>t>0).length+" nuit(s). Parler en dormant est fréquent et bénin la plupart du temps ; elle augmente souvent avec le stress, le manque de sommeil ou l'alcool.",0]);
-  if(debt>3) ins.push(["Dette de sommeil sur 7 nuits : environ "+debt.toFixed(1)+" h par rapport à ton objectif.",1]);
+  if(debt>3) ins.push(["Dette de sommeil sur 7 nuits : "+fmtH(debt)+". Rattrape-la progressivement (30 à 60 min de plus par nuit) plutôt qu'en une seule grasse matinée.",1]);
   for(const r of tagRows.slice(0,2)) if(r.dq<=-0.5) ins.push(["Les soirs « "+r.t+" », ta qualité ressentie est en moyenne plus basse de "+Math.abs(r.dq).toFixed(1)+" point ("+r.n+" nuits).",0]);
 
-  box.innerHTML=`
+  box.innerHTML=head+`
+  <p class="label">Sur les ${ns.length} dernières nuits</p>
   <div class="grid2">
     <div class="stat"><span class="label">Durée moyenne</span><b>${hmm(avgD*3600e3)}</b></div>
     <div class="stat"><span class="label">Score moyen</span><b>${Math.round(mean(scs))}/100</b></div>
     <div class="stat"><span class="label">Coucher moyen</span><b>${bedStr} ±${Math.round(bedSd)} min</b></div>
-    <div class="stat"><span class="label">Dette 7 nuits</span><b>${debt.toFixed(1)} h</b></div>
+    <div class="stat"><span class="label">Score min. / max.</span><b>${Math.min(...scs)} / ${Math.max(...scs)}</b></div>
     <div class="stat"><span class="label">Ronflement / nuit</span><b>${Math.round(mean(snoreMins))} min</b></div>
     <div class="stat"><span class="label">Qualité ressentie</span><b>${quals.length?mean(quals).toFixed(1)+"/5":"–"}</b></div>
   </div>
@@ -724,6 +870,7 @@ async function renderTrends(){
   <div class="panel"><h3>À retenir</h3>${ins.map(([t,a])=>`<div class="insight${a?" alert":""}">${esc(t)}</div>`).join("")}</div>
   <div class="panel"><h3>Habitudes et qualité</h3>${tagRows.length?tagRows.map(r=>`<div class="row between small"><span>${esc(r.t)} <span class="muted">(${r.n} nuits)</span></span><span class="num" style="color:${r.dq<0?"var(--danger)":"var(--good)"}">${r.dq>0?"+":""}${r.dq.toFixed(1)} qualité · ${r.dd>0?"+":"−"}${hmm(Math.abs(r.dd))}</span></div>`).join(""):`<p class="muted small">Coche tes habitudes du soir dans le questionnaire du matin. Avec au moins 3 nuits avec et 3 sans une habitude, son effet apparaîtra ici.</p>`}</div>`;
   const lab=ns.map(n=>shortDay(n.start));
+  drawHead();
   requestAnimationFrame(()=>{
     drawBars($("#cvDur"),durs.map((d,i)=>({v:+d.toFixed(2),l:lab[i],c:d<CFG.target-0.5?cssVar("--danger"):cssVar("--moon")})),{max:Math.max(10,Math.ceil(Math.max(...durs))),ticks:[0,2,4,6,8,10],band:[CFG.target-0.5,CFG.target+1.5]});
     drawBars($("#cvScore"),scs.map((s,i)=>({v:s,l:lab[i],c:s>=75?cssVar("--good"):s>=55?cssVar("--moon"):cssVar("--danger")})),{max:100,ticks:[0,25,50,75,100],h:150});
