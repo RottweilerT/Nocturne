@@ -104,6 +104,18 @@ nav button svg{width:22px;height:22px}
 nav button[aria-current=page]{color:var(--moon)}
 .clip{display:flex;flex-direction:column;gap:8px;padding:10px 12px;background:var(--panel2);border-radius:10px;min-width:0}
 .clip audio{width:100%;height:36px;min-width:0}
+.clip.selected{outline:2px solid var(--moon);outline-offset:-2px}
+.selbox{display:inline-flex;align-items:center;gap:8px;font-size:.9rem;cursor:pointer;padding:4px 0}
+.selbox input{width:20px;height:20px}
+.selbar{position:sticky;bottom:0;z-index:2;background:var(--ink);border:1px solid var(--moon);border-radius:12px;padding:8px 10px;display:flex;flex-direction:column;gap:6px;box-shadow:0 -8px 20px rgba(0,0,0,.45)}
+.selbar .btn.sm{padding:6px 9px;font-size:.82rem}
+.seg{display:grid;grid-template-columns:repeat(4,1fr);gap:3px;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:3px}
+.seg button{border:0;background:none;padding:9px 4px;border-radius:8px;color:var(--muted);font-weight:500}
+.seg button[aria-pressed=true]{background:var(--moon);color:#1d1606}
+.pnav{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;text-align:center}
+.pnav .btn{font-size:1.3rem;line-height:1;padding:8px 14px}
+.weekrow.link{width:100%;background:none;border:0;border-bottom:1px solid var(--line);text-align:left;color:inherit;cursor:pointer}
+.weekrow.link:hover{background:var(--panel2)}
 .btn.sm{padding:6px 11px;font-size:.85rem;background:var(--panel)}
 .btn.armed{background:var(--danger)!important;color:#1a0b08!important;border-color:var(--danger)!important}
 .yearwrap{display:grid;grid-template-columns:36px minmax(0,1fr);align-items:start}
@@ -147,11 +159,17 @@ nav button[aria-current=page]{color:var(--moon)}
 </main>
 
 <main id="view-tendances" hidden>
-  <div class="row between"><h1>Tendances</h1>
-    <div class="row" role="group" aria-label="Période">
-      <button class="chip" data-range="14" aria-pressed="true">14 nuits</button>
-      <button class="chip" data-range="30" aria-pressed="false">30 nuits</button>
-    </div>
+  <h1>Analyse</h1>
+  <div class="seg" role="group" aria-label="Période analysée">
+    <button type="button" data-mode="nuit" aria-pressed="false">Nuit</button>
+    <button type="button" data-mode="semaine" aria-pressed="true">Semaine</button>
+    <button type="button" data-mode="mois" aria-pressed="false">Mois</button>
+    <button type="button" data-mode="annee" aria-pressed="false">Année</button>
+  </div>
+  <div class="pnav" id="pNav">
+    <button type="button" class="btn" id="pPrev" aria-label="Période précédente">‹</button>
+    <div style="min-width:0"><p class="label" id="pKind"></p><h2 id="pTitle" style="font-size:1.15rem"></h2></div>
+    <button type="button" class="btn" id="pNext" aria-label="Période suivante">›</button>
   </div>
   <div id="trendBody" class="evlist"></div>
 </main>
@@ -189,7 +207,7 @@ nav button[aria-current=page]{color:var(--moon)}
 <nav><div class="in">
   <button data-view="nuit" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/></svg>Nuit</button>
   <button data-view="journal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>Journal</button>
-  <button data-view="tendances"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 19h16M6 16V11M10 16V7M14 16v-5M18 16V9"/></svg>Tendances</button>
+  <button data-view="tendances"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 19h16M6 16V11M10 16V7M14 16v-5M18 16V9"/></svg>Analyse</button>
   <button data-view="reglages"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/></svg>Réglages</button>
 </div></nav>
 
@@ -560,10 +578,9 @@ function drawBars(cv,items,opt){
     if(it.v!=null){g.fillStyle=it.c||cssVar("--moon");g.fillRect(X,y(it.v),W,T+ph-y(it.v))}
     else{g.fillStyle=cssVar("--muted");g.textBaseline="bottom";g.fillText("–",X+W/2-3,T+ph-2)}
     const every=Math.max(1,Math.ceil(items.length*36/pw));
-    if(items.length<=16&&(items.length-1-i)%every===0){g.fillStyle=cssVar("--muted");g.textBaseline="top";const lw=g.measureText(it.l).width;g.fillText(it.l,Math.max(L,Math.min(X+W/2-lw/2,w-R-lw)),T+ph+6)}
+    if((items.length-1-i)%every===0){g.fillStyle=cssVar("--muted");g.textBaseline="top";const lw=g.measureText(it.l).width;g.fillText(it.l,Math.max(L,Math.min(X+W/2-lw/2,w-R-lw)),T+ph+6)}
     g.textBaseline="middle"});
   if(opt.line!=null){g.strokeStyle=cssVar("--good");g.setLineDash([4,4]);g.lineWidth=1.5;g.beginPath();g.moveTo(L,y(opt.line));g.lineTo(L+pw,y(opt.line));g.stroke();g.setLineDash([])}
-  if(items.length>16){g.fillStyle=cssVar("--muted");g.textBaseline="top";[0,items.length-1].forEach(i=>{const it=items[i];const X=L+i*bw+bw/2-g.measureText(it.l).width/2;g.fillText(it.l,Math.max(L,Math.min(X,w-R-g.measureText(it.l).width)),T+ph+6)})}
 }
 
 /* ===================== Vues ===================== */
@@ -645,7 +662,18 @@ async function openNight(id){
         ${Object.keys(TYPES).filter(k=>sorted.some(c=>c.type===k)).map(k=>`<button type="button" class="chip" data-filter="${k}" aria-pressed="false"><span class="dot ${TYPES[k].cls}"></span>${TYPES[k].l}</button>`).join("")}
       </div>
       <div class="evlist">${sorted.map((c,i)=>clipRow(c,i,n)).join("")}</div>
-      ${sorted.length>1?`<button type="button" class="btn danger" data-act="all">Supprimer tous les extraits de cette nuit</button>`:""}`
+      <div class="selbar" id="selBar" hidden>
+        <p class="small"><b class="num" id="selCount">0</b> sélectionné(s)</p>
+        <div class="row" style="gap:6px">
+          <button type="button" class="btn sm" data-act="keep">Supprimer les autres (<span id="selOthers">0</span>)</button>
+          <button type="button" class="btn sm" data-act="delsel">Supprimer la sélection</button>
+          <button type="button" class="btn sm" data-act="clear">Annuler</button>
+        </div>
+      </div>
+      <div class="row">
+        <button type="button" class="btn sm" data-act="selall">Tout sélectionner</button>
+        ${sorted.length>1?`<button type="button" class="btn sm danger" data-act="all">Supprimer tous les extraits</button>`:""}
+      </div>`
     :`<p class="muted small">Aucun extrait pour cette nuit.</p>`}
     ${talkNoClip?`<p class="muted small">${talkNoClip} épisode(s) de parole détecté(s) sans extrait audio.</p>`:""}
   </div>
@@ -654,19 +682,27 @@ async function openNight(id){
   $("#closeS").onclick=closeSheet; $("#editForm").onclick=()=>openForm(n);
   const dn=$("#delNight"); dn.onclick=async()=>{if(dn.dataset.armed){await del("nights",id);for(const c of clips)await del("clips",c.id);closeSheet();renderJournal();toast("Nuit supprimée")}else{dn.dataset.armed=1;dn.textContent="Toucher encore pour confirmer"}};
   document.querySelectorAll("#sheetBody audio[data-clip]").forEach(a=>{const c=clipMap[a.dataset.clip];if(c)a.src=URL.createObjectURL(c.blob)});
-  const panel=$("#clipPanel");
+  const panel=$("#clipPanel"), selected=new Set();
+  const plural=(k,w)=>k+" "+w+(k>1?"s":"");
+  const setSel=(cb,on)=>{cb.checked=on;on?selected.add(cb.dataset.sel):selected.delete(cb.dataset.sel);cb.closest(".clip").classList.toggle("selected",on)};
+  const updateBar=()=>{const bar=$("#selBar");if(!bar)return;bar.hidden=!selected.size;$("#selCount").textContent=selected.size;bar.querySelectorAll(".armed").forEach(x=>{x.classList.remove("armed");x.innerHTML=x.dataset.orig});const k=bar.querySelector("[data-act=keep]");k.innerHTML="Supprimer les autres (<span id=\"selOthers\">"+(sorted.length-selected.size)+"</span>)"};
+  panel.addEventListener("change",e=>{const cb=e.target.closest("[data-sel]");if(!cb)return;setSel(cb,cb.checked);updateBar()});
   panel.addEventListener("click",async e=>{
     const f=e.target.closest("[data-filter]");
     if(f){panel.querySelectorAll("[data-filter]").forEach(x=>x.setAttribute("aria-pressed",x===f));
       panel.querySelectorAll(".clip").forEach(c=>c.hidden=f.dataset.filter!=="all"&&c.dataset.type!==f.dataset.filter);return}
     const b=e.target.closest("[data-act]"); if(!b)return;
-    let ids=[], msg="";
-    if(b.dataset.act==="all"){if(!armBtn(b,"Toucher encore : supprimer les "+sorted.length+" extraits"))return;ids=sorted.map(c=>c.id);msg=ids.length+" extraits supprimés"}
-    else{const id=b.closest(".clip").dataset.id;
-      if(b.dataset.act==="del"){if(!armBtn(b,"Confirmer la suppression"))return;ids=[id];msg="Extrait supprimé"}
-      else{ids=sorted.filter(c=>c.id!==id).map(c=>c.id);if(!ids.length){toast("C'est déjà le seul extrait de la nuit");return}
-        if(!armBtn(b,"Toucher encore : supprimer les "+ids.length+" autres"))return;msg=ids.length+" extrait"+(ids.length>1?"s":"")+" supprimé"+(ids.length>1?"s":"")}}
-    await removeClips(n,ids); toast(msg);
+    const act=b.dataset.act; let ids=[];
+    if(act==="selall"){panel.querySelectorAll(".clip:not([hidden]) [data-sel]").forEach(cb=>setSel(cb,true));updateBar();return}
+    if(act==="clear"){panel.querySelectorAll("[data-sel]").forEach(cb=>setSel(cb,false));updateBar();return}
+    if(act==="all"){if(!armBtn(b,"Toucher encore : supprimer les "+sorted.length+" extraits"))return;ids=sorted.map(c=>c.id)}
+    else if(act==="keep"){ids=sorted.filter(c=>!selected.has(c.id)).map(c=>c.id);
+      if(!ids.length){toast("Tous les extraits sont sélectionnés : rien à supprimer");return}
+      if(!armBtn(b,"Toucher encore : supprimer les "+ids.length+" autres"))return}
+    else if(act==="delsel"){ids=[...selected];if(!armBtn(b,"Toucher encore : supprimer "+plural(ids.length,"extrait")))return}
+    else if(act==="del"){if(!armBtn(b,"Confirmer la suppression"))return;ids=[b.closest(".clip").dataset.id]}
+    else return;
+    await removeClips(n,ids); toast(plural(ids.length,"extrait")+(ids.length>1?" supprimés":" supprimé"));
     const st=$("#sheetBody").scrollTop; revokeAudios(); await openNight(id); $("#sheetBody").scrollTop=st;
   });
 }
@@ -694,7 +730,7 @@ function clipRow(c,i,n){const T=TYPES[c.type]||TYPES.bruit, d=clipDur(c,n);
   return `<div class="clip" data-id="${c.id}" data-type="${esc(c.type)}">
     <div class="row between small"><span class="row" style="gap:8px"><span class="dot ${T.cls}"></span><b style="font-weight:500">${T.l}</b><span class="num muted">${hm(c.t)}${d?` · ≈ ${d} s`:""}</span></span><span class="num muted">n° ${i+1}</span></div>
     <audio controls preload="none" data-clip="${c.id}"></audio>
-    <div class="row"><button type="button" class="btn sm" data-act="del">Supprimer</button><button type="button" class="btn sm" data-act="only">Ne garder que celui-ci</button></div>
+    <div class="row between"><label class="selbox"><input type="checkbox" data-sel="${c.id}" id="sel-${c.id}"> Sélectionner</label><button type="button" class="btn sm" data-act="del">Supprimer</button></div>
   </div>`}
 
 /* Questionnaire du matin */
@@ -733,61 +769,106 @@ function openForm(n){
   };
 }
 
-/* Tendances */
-let RANGE=14;
-document.querySelectorAll("[data-range]").forEach(b=>b.onclick=()=>{RANGE=+b.dataset.range;document.querySelectorAll("[data-range]").forEach(x=>x.setAttribute("aria-pressed",x===b));renderTrends()});
-/* ---- Analyse par nuit calendaire ---- */
+/* ===================== Analyse : nuit, semaine, mois, année ===================== */
 /* Une nuit appartient au jour où elle commence : coucher à 1 h le mercredi = nuit du mardi */
 function nightKey(t){const d=new Date(t-12*3600e3);d.setHours(0,0,0,0);return d.getTime()}
 function shiftDay(key,n){const d=new Date(key);d.setDate(d.getDate()+n);d.setHours(0,0,0,0);return d.getTime()}
-function sleepByNight(allN){const m=new Map();for(const n of allN){const k=nightKey(n.start);m.set(k,(m.get(k)||0)+sleepWindow(n).dur/3600e3)}return m}
-function lastNightKey(map){const now=Date.now();let k=nightKey(now);if(!map.has(k)&&new Date(now).getHours()>=12)k=shiftDay(k,-1);return k}
-/* Dette nette : somme des écarts à l'objectif sur les nuits enregistrées ; une nuit plus longue rembourse une partie */
-function weekDebt(map,endKey,target){
-  const days=[];for(let i=6;i>=0;i--){const k=shiftDay(endKey,-i);days.push({k,h:map.has(k)?map.get(k):null})}
-  const rec=days.filter(d=>d.h!=null); const bal=rec.reduce((s,d)=>s+d.h-target,0);
-  return {days,rec:rec.length,debt:Math.max(0,-bal),bal,avg:rec.length?mean(rec.map(d=>d.h)):null};
-}
 const fmtH=h=>hmm(h*3600e3);
 const signedH=h=>(h<0?"−":"+")+fmtH(Math.abs(h));
 const cap=s=>s.charAt(0).toUpperCase()+s.slice(1);
+const fmtT=m=>{m=((Math.round(m)%1440)+1440)%1440;return pad(Math.floor(m/60))+":"+pad(m%60)};
+const minOfDay=t=>{const d=new Date(t);return d.getHours()*60+d.getMinutes()};
+const snoreMinOf=n=>new Set((n.events||[]).filter(e=>e.type==="ronflement").map(e=>Math.floor(e.t/60000))).size;
+const tgtStr=()=>String(CFG.target).replace(".",",")+" h";
+const MODES={nuit:"Nuit",semaine:"Semaine",mois:"Mois",annee:"Année"};
+const PREV_NAME={semaine:"la semaine précédente",mois:"le mois précédent",annee:"l'année précédente"};
 
-function weekHtml(map){
-  const end=lastNightKey(map), w=weekDebt(map,end,CFG.target), prev=weekDebt(map,shiftDay(end,-7),CFG.target);
-  const col=w.debt<1?"var(--good)":w.debt<4?"var(--moon)":"var(--danger)";
-  return {w,html:`<div class="panel">
-    <h3>Dette de sommeil · 7 dernières nuits</h3>
-    <div class="grid3">
-      <div class="stat"><span class="label">Dette</span><b style="color:${col}">${w.rec?fmtH(w.debt):"–"}</b></div>
-      <div class="stat"><span class="label">Moyenne / nuit</span><b>${w.avg!=null?fmtH(w.avg):"–"}</b></div>
-      <div class="stat"><span class="label">Nuits suivies</span><b>${w.rec}/7</b></div>
-    </div>
-    <div class="chart"><canvas id="cvWeek" role="img" aria-label="Heures dormies sur les 7 dernières nuits"></canvas></div>
-    <div>${w.days.slice().reverse().map(d=>`<div class="weekrow"><span>${cap(new Date(d.k).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"short"}))}</span>
-      <span class="num">${d.h!=null?fmtH(d.h):"<span class='muted'>non suivie</span>"}</span>
-      <span class="num" style="min-width:76px;text-align:right;color:${d.h==null?"var(--muted)":d.h<CFG.target?"var(--danger)":"var(--good)"}">${d.h!=null?signedH(d.h-CFG.target):""}</span></div>`).join("")}</div>
-    <p class="muted small">Chaque nuit sous ton objectif de ${String(CFG.target).replace(".",",")} h ajoute à la dette ; une nuit plus longue en rembourse une partie. Les nuits non suivies ne comptent pas.${prev.rec?` Semaine précédente : ${fmtH(prev.debt)} de dette sur ${prev.rec} nuit${prev.rec>1?"s":""}.`:""}</p>
-  </div>`};
+/* Regroupe les enregistrements par nuit calendaire (durées additionnées si plusieurs) */
+function nightIndex(allN){
+  const m=new Map();
+  for(const n of allN){const k=nightKey(n.start);const o=m.get(k)||{k,h:0,list:[]};o.h+=sleepWindow(n).dur/3600e3;o.list.push(n);m.set(k,o)}
+  for(const o of m.values())o.main=o.list.reduce((a,b)=>(b.end-b.start)>(a.end-a.start)?b:a);
+  return m;
+}
+function lastNightKey(idx){const now=Date.now();let k=nightKey(now);if(!idx.has(k)&&new Date(now).getHours()>=12)k=shiftDay(k,-1);return k}
+function weekStart(k){const d=new Date(k);d.setDate(d.getDate()-(d.getDay()+6)%7);d.setHours(0,0,0,0);return d.getTime()}
+function periodOf(mode,a){const d=new Date(a);
+  if(mode==="semaine"){const s=weekStart(a);return {start:s,end:shiftDay(s,7)}}
+  if(mode==="mois")return {start:new Date(d.getFullYear(),d.getMonth(),1).getTime(),end:new Date(d.getFullYear(),d.getMonth()+1,1).getTime()};
+  if(mode==="annee")return {start:new Date(d.getFullYear(),0,1).getTime(),end:new Date(d.getFullYear()+1,0,1).getTime()};
+  return {start:a,end:shiftDay(a,1)};
+}
+function shiftPeriod(mode,a,dir){const d=new Date(a);
+  if(mode==="semaine")return shiftDay(a,7*dir);
+  if(mode==="mois")return new Date(d.getFullYear(),d.getMonth()+dir,1).getTime();
+  return new Date(d.getFullYear()+dir,0,1).getTime();
+}
+function daysIn(p,idx){const out=[];for(let k=p.start;k<p.end;k=shiftDay(k,1)){const o=idx.get(k);out.push({k,h:o?o.h:null,o})}return out}
+function periodTitle(mode,p){
+  const s=new Date(p.start), e=new Date(shiftDay(p.end,-1));
+  if(mode==="nuit")return cap(dayLabel(p.start));
+  if(mode==="semaine")return "Du "+s.toLocaleDateString("fr-FR",s.getMonth()===e.getMonth()?{day:"numeric"}:{day:"numeric",month:"short"})+" au "+e.toLocaleDateString("fr-FR",{day:"numeric",month:"short",year:"numeric"});
+  if(mode==="mois")return cap(s.toLocaleDateString("fr-FR",{month:"long",year:"numeric"}));
+  return String(s.getFullYear());
 }
 
-function yearDays(map){const end=lastNightKey(map);const out=[];for(let i=364;i>=0;i--){const k=shiftDay(end,-i);out.push({k,h:map.has(k)?map.get(k):null})}return out}
-function yearHtml(days){
-  const rec=days.filter(d=>d.h!=null); if(!rec.length)return "";
-  const best=rec.reduce((a,b)=>b.h>a.h?b:a), worst=rec.reduce((a,b)=>b.h<a.h?b:a);
-  const dd=k=>new Date(k).toLocaleDateString("fr-FR",{day:"numeric",month:"short"});
-  return `<div class="panel">
-    <div class="row between"><h3>Ton année de sommeil</h3><span class="muted small">12 derniers mois</span></div>
-    <div class="grid2">
-      <div class="stat"><span class="label">Moyenne</span><b>${fmtH(mean(rec.map(d=>d.h)))}</b></div>
-      <div class="stat"><span class="label">Nuits suivies</span><b>${rec.length}</b></div>
-      <div class="stat"><span class="label">Plus longue · ${dd(best.k)}</span><b>${fmtH(best.h)}</b></div>
-      <div class="stat"><span class="label">Plus courte · ${dd(worst.k)}</span><b>${fmtH(worst.h)}</b></div>
-    </div>
-    <div class="yearwrap"><canvas id="cvYearAxis" aria-hidden="true"></canvas><div class="chart" id="yearScroll"><canvas id="cvYear" role="img" aria-label="Heures dormies chaque nuit sur 12 mois"></canvas></div></div>
-    <p class="small num" id="yearRead">Touche une barre pour voir le détail de la nuit.</p>
-    <div class="legend"><span><span class="dot" style="background:var(--moon)"></span>heures dormies</span><span><span class="dot" style="background:var(--danger)"></span>sous l'objectif</span><span><span class="dot" style="background:var(--fg)"></span>moyenne sur 7 nuits</span><span><span class="dot" style="background:var(--good)"></span>objectif ${String(CFG.target).replace(".",",")} h</span></div>
+/* Statistiques d'une liste de jours (seules les nuits suivies comptent) */
+function periodStats(days,allN,lastK){
+  const rec=days.filter(d=>d.h!=null), elapsed=days.filter(d=>d.k<=lastK).length;
+  if(!rec.length)return {rec:0,elapsed};
+  const T=CFG.target, hs=rec.map(d=>d.h), mains=rec.map(d=>d.o.main);
+  const beds=mains.map(n=>bedMinutes(n.start)), wakes=mains.map(n=>minOfDay(sleepWindow(n).wake));
+  const quals=mains.filter(n=>n.form).map(n=>n.form.quality);
+  return {rec:rec.length,elapsed,avg:mean(hs),total:hs.reduce((a,b)=>a+b,0),
+    debt:Math.max(0,rec.reduce((s,d)=>s+T-d.h,0)),
+    best:rec.reduce((a,b)=>b.h>a.h?b:a),worst:rec.reduce((a,b)=>b.h<a.h?b:a),
+    short:hs.filter(h=>h<6).length,onTarget:hs.filter(h=>h>=T-0.5).length,
+    bed:mean(beds),bedSd:sd(beds),wake:mean(wakes),
+    score:mean(mains.map(n=>nightScore(n,allN).total)),
+    snore:mean(mains.map(snoreMinOf)),talkNights:mains.filter(n=>counts(n.events||[]).parole>0).length,
+    talk:mains.reduce((s,n)=>s+counts(n.events||[]).parole,0),
+    qual:quals.length?mean(quals):null,mains};
+}
+const stat=(label,val,col)=>`<div class="stat"><span class="label">${label}</span><b${col?` style="color:${col}"`:""}>${val}</b></div>`;
+const debtCol=d=>d<1?"var(--good)":d<4?"var(--moon)":"var(--danger)";
+
+/* Dette glissante sur les 7 dernières nuits, affichée en tête de chaque vue */
+function rollingStrip(idx,allN,lastK){
+  const days=[];for(let i=6;i>=0;i--){const k=shiftDay(lastK,-i);const o=idx.get(k);days.push({k,h:o?o.h:null,o})}
+  const s=periodStats(days,allN,lastK);
+  return `<div class="grid2">
+    ${stat("Dette · 7 dernières nuits",s.rec?fmtH(s.debt):"–",s.rec?debtCol(s.debt):"")}
+    ${stat("Moyenne · 7 dernières nuits",s.rec?fmtH(s.avg)+` <span class="muted small">(${s.rec}/7)</span>`:"–")}
   </div>`;
 }
+function insightsFor(s,label){
+  const ins=[];
+  if(s.rec<2)return ins;
+  if(s.avg<CFG.target-0.75) ins.push(["Tu as dormi en moyenne "+fmtH(s.avg)+" "+label+", sous ton objectif de "+tgtStr()+". Avancer le coucher de 20 à 30 minutes est souvent plus facile que de retarder le réveil.",1]);
+  else ins.push(["Durée moyenne "+label+" : "+fmtH(s.avg)+", proche de ton objectif de "+tgtStr()+".",0]);
+  if(s.rec>=4){ if(s.bedSd>60) ins.push(["Ton heure de coucher a varié de ±"+Math.round(s.bedSd)+" min. Un horaire régulier, week-end compris, aide l'horloge interne et facilite l'endormissement.",1]);
+    else ins.push(["Heure de coucher régulière (±"+Math.round(s.bedSd)+" min). Continue ainsi.",0]); }
+  if(s.debt>3) ins.push(["Dette de "+fmtH(s.debt)+" "+label+". Rattrape-la progressivement (30 à 60 min de plus par nuit) plutôt qu'en une seule grasse matinée.",1]);
+  const snoreNights=s.mains.filter(n=>snoreMinOf(n)>=30).length;
+  if(snoreNights>=Math.max(3,s.rec*0.5)) ins.push(["Ronflement notable (30 min ou plus) sur "+snoreNights+" nuits sur "+s.rec+". S'il est fort, quotidien, ou accompagné de fatigue en journée ou de pauses respiratoires remarquées, parles-en à un médecin : cela peut signaler une apnée du sommeil.",1]);
+  if(s.talkNights) ins.push(["Somniloquie sur "+s.talkNights+" nuit(s) "+label+". Parler en dormant est fréquent et le plus souvent bénin ; c'est plus courant en cas de stress, de manque de sommeil ou d'alcool.",0]);
+  return ins;
+}
+function habitsHtml(allN){
+  const withForm=allN.filter(n=>n.form); const rows=[];
+  for(const t of TAGS){const a=withForm.filter(n=>n.form.tags?.includes(t)), b=withForm.filter(n=>!n.form.tags?.includes(t));
+    if(a.length>=3&&b.length>=3)rows.push({t,n:a.length,dq:mean(a.map(n=>n.form.quality))-mean(b.map(n=>n.form.quality)),dd:mean(a.map(n=>sleepWindow(n).dur))-mean(b.map(n=>sleepWindow(n).dur))})}
+  rows.sort((x,y)=>x.dq-y.dq);
+  return `<div class="panel"><h3>Habitudes et qualité <span class="muted small">· toutes tes nuits</span></h3>${rows.length?rows.map(r=>`<div class="row between small"><span>${esc(r.t)} <span class="muted">(${r.n} nuits)</span></span><span class="num" style="color:${r.dq<0?"var(--danger)":"var(--good)"}">${r.dq>0?"+":""}${r.dq.toFixed(1)} qualité · ${r.dd>=0?"+":"−"}${hmm(Math.abs(r.dd))}</span></div>`).join(""):`<p class="muted small">Coche tes habitudes du soir dans le questionnaire du matin. Avec au moins 3 nuits avec et 3 sans une habitude, son effet apparaîtra ici.</p>`}</div>`;
+}
+function dayRow(d,lastK){
+  const lbl=cap(new Date(d.k).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"short"}));
+  const right=d.h!=null?`<span class="num">${fmtH(d.h)}</span><span class="num" style="min-width:76px;text-align:right;color:${d.h<CFG.target?"var(--danger)":"var(--good)"}">${signedH(d.h-CFG.target)}</span>`
+    :`<span class="muted">${d.k>lastK?"à venir":"non suivie"}</span><span></span>`;
+  return d.h!=null?`<button type="button" class="weekrow link" data-goto="nuit:${d.k}"><span>${lbl}</span>${right}</button>`:`<div class="weekrow"><span class="muted">${lbl}</span>${right}</div>`;
+}
+
+/* ---------- Graphique annuel (une barre par nuit, défilement horizontal) ---------- */
 const YEAR_H=210, YEAR_T=10, YEAR_B=26, YEAR_MAX=12;
 function drawYear(days,sel){
   const cv=$("#cvYear"), ax=$("#cvYearAxis"), sc=$("#yearScroll"); if(!cv)return;
@@ -796,87 +877,153 @@ function drawYear(days,sel){
   const {g,w,h}=setupCanvas(cv,YEAR_H), ph=h-YEAR_T-YEAR_B, y=v=>YEAR_T+ph-(Math.min(v,YEAR_MAX)/YEAR_MAX)*ph, bwr=w/days.length;
   const ticks=[0,2,4,6,8,10,12];
   for(const t of ticks){g.fillStyle=cssVar("--line");g.fillRect(0,Math.round(y(t))+.5,w,1)}
-  // mois
   g.font="10px "+cssVar("--mono");g.textBaseline="top";
   days.forEach((d,i)=>{const dt=new Date(d.k);if(dt.getDate()===1){const X=i*bwr;g.fillStyle=cssVar("--line");g.fillRect(X,YEAR_T,1,ph);
-    g.fillStyle=cssVar("--muted");g.fillText(dt.toLocaleDateString("fr-FR",{month:"short"})+(dt.getMonth()===0?" "+dt.getFullYear():""),X+3,YEAR_T+ph+7)}});
-  // barres
+    g.fillStyle=cssVar("--muted");g.fillText(dt.toLocaleDateString("fr-FR",{month:"short"}),X+3,YEAR_T+ph+7)}});
   days.forEach((d,i)=>{if(d.h==null)return;g.fillStyle=d.h<CFG.target-0.5?cssVar("--danger"):cssVar("--moon");g.fillRect(i*bwr,y(d.h),Math.max(1,bwr-1),YEAR_T+ph-y(d.h))});
-  // objectif
   g.strokeStyle=cssVar("--good");g.setLineDash([4,4]);g.lineWidth=1.2;g.beginPath();g.moveTo(0,y(CFG.target));g.lineTo(w,y(CFG.target));g.stroke();g.setLineDash([]);
-  // moyenne glissante sur 7 jours (au moins 3 nuits suivies dans la fenêtre)
   g.strokeStyle=cssVar("--fg");g.lineWidth=1.6;g.beginPath();let pen=false;
   days.forEach((d,i)=>{const win=days.slice(Math.max(0,i-6),i+1).filter(x=>x.h!=null);
     if(win.length>=3){const X=i*bwr+bwr/2,Y=y(mean(win.map(x=>x.h)));pen?g.lineTo(X,Y):g.moveTo(X,Y);pen=true}else pen=false});
   g.stroke();
   if(sel!=null){g.strokeStyle=cssVar("--fg");g.lineWidth=1;g.strokeRect(sel*bwr-1.5,YEAR_T,bwr+2,ph)}
-  // axe des heures, fixe à gauche
   const a=setupCanvas(ax,YEAR_H); a.g.font="10px "+cssVar("--mono");a.g.fillStyle=cssVar("--muted");a.g.textBaseline="middle";
   for(const t of ticks)a.g.fillText(t+" h",2,y(t));
   cv.onclick=e=>{const r=cv.getBoundingClientRect();const i=Math.max(0,Math.min(days.length-1,Math.floor((e.clientX-r.left)/bwr)));
     const d=days[i];$("#yearRead").textContent=cap(dayLabel(d.k))+" : "+(d.h!=null?fmtH(d.h)+" dormies ("+signedH(d.h-CFG.target)+" par rapport à l'objectif)":"nuit non suivie");drawYear(days,i)};
 }
 
-async function renderTrends(){
-  const allN=await nights(); const ns=allN.slice(-RANGE); const box=$("#trendBody");
-  if(!allN.length){box.innerHTML="<div class='panel'><p class='muted'>Les analyses apparaissent après ta première nuit enregistrée.</p></div>";return}
-  const map=sleepByNight(allN), wk=weekHtml(map), days=yearDays(map);
-  const head=wk.html+yearHtml(days);
-  const drawHead=()=>requestAnimationFrame(()=>{
-    drawBars($("#cvWeek"),wk.w.days.map(d=>({v:d.h,l:new Date(d.k).toLocaleDateString("fr-FR",{weekday:"short"}).replace(".",""),c:d.h!=null&&d.h<CFG.target?cssVar("--danger"):cssVar("--moon")})),
-      {max:Math.max(10,Math.ceil(Math.max(0,...wk.w.days.map(d=>d.h||0)))),ticks:[0,4,8],fmt:t=>t+" h",line:CFG.target,h:150});
-    drawYear(days); const s=$("#yearScroll"); if(s)s.scrollLeft=s.scrollWidth;
-  });
-  if(ns.length<2){box.innerHTML=head+"<div class='panel'><p class='muted'>Les autres tendances (score, régularité, ronflement, habitudes) apparaissent à partir de deux nuits enregistrées.</p></div>";drawHead();return}
-  const ws=ns.map(sleepWindow), durs=ws.map(w=>w.dur/3600e3), scs=ns.map(n=>nightScore(n,allN).total);
-  const beds=ns.map(n=>bedMinutes(n.start)), bedSd=sd(beds);
-  const avgBed=mean(beds)%(24*60); const bedStr=pad(Math.floor(avgBed/60)%24)+":"+pad(Math.round(avgBed%60));
-  const debt=wk.w.debt;
-  const snoreMins=ns.map(n=>new Set(n.events.filter(e=>e.type==="ronflement").map(e=>Math.floor(e.t/60000))).size);
-  const talks=ns.map(n=>counts(n.events).parole);
-  const quals=ns.filter(n=>n.form).map(n=>n.form.quality);
-  // habitudes : comparaison de la qualité avec / sans chaque étiquette
-  const withForm=allN.filter(n=>n.form); const tagRows=[];
-  for(const t of TAGS){const a=withForm.filter(n=>n.form.tags?.includes(t)), b=withForm.filter(n=>!n.form.tags?.includes(t));
-    if(a.length>=3&&b.length>=3){const dq=mean(a.map(n=>n.form.quality))-mean(b.map(n=>n.form.quality));
-      const dd=mean(a.map(n=>sleepWindow(n).dur))-mean(b.map(n=>sleepWindow(n).dur));tagRows.push({t,dq,dd,n:a.length})}}
-  tagRows.sort((x,y)=>x.dq-y.dq);
-  const ins=[];
-  const avgD=mean(durs);
-  if(avgD<CFG.target-0.75) ins.push(["Tu dors en moyenne "+hmm(avgD*3600e3)+", sous ton objectif de "+CFG.target+" h. Avancer le coucher de 20 à 30 minutes est souvent plus facile que de retarder le réveil.",0]);
-  else ins.push(["Ta durée moyenne ("+hmm(avgD*3600e3)+") est proche de ton objectif.",0]);
-  if(bedSd>60) ins.push(["Ton heure de coucher varie de ±"+Math.round(bedSd)+" min. Un horaire régulier, week-end compris, aide l'horloge interne et facilite l'endormissement.",0]);
-  else if(ns.length>=5) ins.push(["Heure de coucher régulière (±"+Math.round(bedSd)+" min). Continue ainsi.",0]);
-  const snoreNights=snoreMins.filter(m=>m>=30).length;
-  if(snoreNights>=Math.max(3,ns.length*0.5)) ins.push(["Ronflement notable (30 min ou plus) sur "+snoreNights+" nuits sur "+ns.length+". Si c'est fort, quotidien, ou accompagné de fatigue en journée ou de pauses respiratoires remarquées, parles-en à un médecin : cela peut signaler une apnée du sommeil.",1]);
-  if(talks.some(t=>t>0)) ins.push(["Somniloquie détectée sur "+talks.filter(t=>t>0).length+" nuit(s). Parler en dormant est fréquent et bénin la plupart du temps ; elle augmente souvent avec le stress, le manque de sommeil ou l'alcool.",0]);
-  if(debt>3) ins.push(["Dette de sommeil sur 7 nuits : "+fmtH(debt)+". Rattrape-la progressivement (30 à 60 min de plus par nuit) plutôt qu'en une seule grasse matinée.",1]);
-  for(const r of tagRows.slice(0,2)) if(r.dq<=-0.5) ins.push(["Les soirs « "+r.t+" », ta qualité ressentie est en moyenne plus basse de "+Math.abs(r.dq).toFixed(1)+" point ("+r.n+" nuits).",0]);
+/* ---------- État et rendu ---------- */
+const AN={mode:"semaine",anchor:null};
+document.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{AN.mode=b.dataset.mode;renderTrends()});
+$("#pPrev").onclick=()=>moveAnalysis(-1); $("#pNext").onclick=()=>moveAnalysis(1);
+$("#trendBody").addEventListener("click",e=>{
+  const g=e.target.closest("[data-goto]"); if(g){const [m,k]=g.dataset.goto.split(":");AN.mode=m;AN.anchor=+k;renderTrends();window.scrollTo(0,0);return}
+  const o=e.target.closest("[data-open]"); if(o)openNight(o.dataset.open);
+});
+let AN_CTX=null;
+function moveAnalysis(dir){
+  if(!AN_CTX)return; const {keys}=AN_CTX;
+  if(AN.mode==="nuit"){const i=keys.indexOf(AN.anchor);const j=i+dir;if(j>=0&&j<keys.length)AN.anchor=keys[j]}
+  else AN.anchor=shiftPeriod(AN.mode,AN.anchor,dir);
+  renderTrends();
+}
 
-  box.innerHTML=head+`
-  <p class="label">Sur les ${ns.length} dernières nuits</p>
-  <div class="grid2">
-    <div class="stat"><span class="label">Durée moyenne</span><b>${hmm(avgD*3600e3)}</b></div>
-    <div class="stat"><span class="label">Score moyen</span><b>${Math.round(mean(scs))}/100</b></div>
-    <div class="stat"><span class="label">Coucher moyen</span><b>${bedStr} ±${Math.round(bedSd)} min</b></div>
-    <div class="stat"><span class="label">Score min. / max.</span><b>${Math.min(...scs)} / ${Math.max(...scs)}</b></div>
-    <div class="stat"><span class="label">Ronflement / nuit</span><b>${Math.round(mean(snoreMins))} min</b></div>
-    <div class="stat"><span class="label">Qualité ressentie</span><b>${quals.length?mean(quals).toFixed(1)+"/5":"–"}</b></div>
+async function renderTrends(){
+  const box=$("#trendBody"); const allN=await nights();
+  document.querySelectorAll("[data-mode]").forEach(b=>b.setAttribute("aria-pressed",b.dataset.mode===AN.mode));
+  if(!allN.length){$("#pNav").hidden=true;box.innerHTML="<div class='panel'><p class='muted'>Les analyses apparaissent après ta première nuit enregistrée. Lance l'enregistrement depuis l'onglet Nuit au moment de te coucher.</p></div>";return}
+  $("#pNav").hidden=false;
+  const idx=nightIndex(allN), lastK=lastNightKey(idx), keys=[...idx.keys()].sort((a,b)=>a-b);
+  AN_CTX={keys};
+  if(AN.anchor==null)AN.anchor=lastK;
+  if(AN.mode==="nuit"&&!idx.has(AN.anchor)){const before=keys.filter(k=>k<=AN.anchor);AN.anchor=before.length?before[before.length-1]:keys[0]}
+  const p=periodOf(AN.mode,AN.anchor);
+  $("#pKind").textContent=MODES[AN.mode]; $("#pTitle").textContent=periodTitle(AN.mode,p);
+  if(AN.mode==="nuit"){const i=keys.indexOf(AN.anchor);$("#pPrev").disabled=i<=0;$("#pNext").disabled=i>=keys.length-1}
+  else{$("#pPrev").disabled=keys[0]>=p.start;$("#pNext").disabled=p.end>lastK}
+  const strip=rollingStrip(idx,allN,lastK);
+  if(AN.mode==="nuit"){renderNightView(box,idx.get(AN.anchor),allN,keys,idx,strip);return}
+  renderPeriodView(box,p,idx,allN,lastK,strip);
+}
+
+function renderNightView(box,o,allN,keys,idx,strip){
+  const n=o.main, w=sleepWindow(n), sc=nightScore(n,allN), co=counts(n.events||[]);
+  const prior=keys.filter(k=>k<o.k).slice(-30).map(k=>idx.get(k).h);
+  const cmp=prior.length>=3?signedH(o.h-mean(prior))+" par rapport à ta moyenne des "+prior.length+" nuits précédentes ("+fmtH(mean(prior))+")":"";
+  const col=sc.total>=75?"var(--good)":sc.total>=55?"var(--moon)":"var(--danger)";
+  box.innerHTML=strip+`
+  <div class="panel">
+    <div class="grid2">
+      ${stat("Sommeil",fmtH(o.h),o.h<CFG.target?"var(--danger)":"var(--good)")}
+      ${stat("Écart à l'objectif",signedH(o.h-CFG.target))}
+      ${stat("Score",sc.total+"/100",col)}
+      ${stat("Endormi → réveil",hm(w.onset)+" → "+hm(w.wake))}
+      ${stat("Au lit",hm(n.start)+" → "+hm(n.end))}
+      ${stat("Qualité ressentie",n.form?n.form.quality+"/5":"–")}
+      ${stat("Ronflement",snoreMinOf(n)+" min")}
+      ${stat("Parole",co.parole+"×")}
+    </div>
+    ${cmp?`<p class="small">${cmp}</p>`:""}
+    ${o.list.length>1?`<p class="muted small">${o.list.length} enregistrements cette nuit-là : les durées sont additionnées.</p>`:""}
   </div>
-  <div class="panel"><h3>Durée de sommeil</h3><div class="chart"><canvas id="cvDur" role="img" aria-label="Durée de sommeil par nuit"></canvas></div><p class="muted small">Bande verte : ton objectif (${CFG.target} h, de −30 min à +1 h 30).</p></div>
-  <div class="panel"><h3>Score de nuit</h3><div class="chart"><canvas id="cvScore" role="img" aria-label="Score par nuit"></canvas></div></div>
-  <div class="panel"><h3>Ronflement (minutes) et parole</h3><div class="chart"><canvas id="cvSnore" role="img" aria-label="Minutes de ronflement par nuit"></canvas></div>
-    <div class="legend"><span><span class="dot d-snore"></span>minutes avec ronflement</span><span>Parole : ${talks.join(" · ")}</span></div></div>
-  <div class="panel"><h3>À retenir</h3>${ins.map(([t,a])=>`<div class="insight${a?" alert":""}">${esc(t)}</div>`).join("")}</div>
-  <div class="panel"><h3>Habitudes et qualité</h3>${tagRows.length?tagRows.map(r=>`<div class="row between small"><span>${esc(r.t)} <span class="muted">(${r.n} nuits)</span></span><span class="num" style="color:${r.dq<0?"var(--danger)":"var(--good)"}">${r.dq>0?"+":""}${r.dq.toFixed(1)} qualité · ${r.dd>0?"+":"−"}${hmm(Math.abs(r.dd))}</span></div>`).join(""):`<p class="muted small">Coche tes habitudes du soir dans le questionnaire du matin. Avec au moins 3 nuits avec et 3 sans une habitude, son effet apparaîtra ici.</p>`}</div>`;
-  const lab=ns.map(n=>shortDay(n.start));
-  drawHead();
+  <div class="panel"><h3>Déroulé de la nuit</h3><div class="chart"><canvas id="anNight" role="img" aria-label="Niveau sonore et événements au fil de la nuit"></canvas></div>
+    <div class="legend"><span><span class="dot d-talk"></span>parole</span><span><span class="dot d-snore"></span>ronflement</span><span><span class="dot d-noise"></span>bruit</span><span><span class="dot" style="background:rgba(242,199,123,.4)"></span>sommeil estimé</span></div>
+    <button type="button" class="btn" data-open="${n.id}">Voir le détail, le ressenti et les extraits audio</button>
+  </div>
+  <div class="row"><button type="button" class="btn sm" data-goto="semaine:${o.k}">Voir la semaine</button><button type="button" class="btn sm" data-goto="mois:${o.k}">Voir le mois</button></div>`;
+  requestAnimationFrame(()=>drawNight($("#anNight"),n));
+}
+
+function renderPeriodView(box,p,idx,allN,lastK,strip){
+  const mode=AN.mode, days=daysIn(p,idx), s=periodStats(days,allN,lastK);
+  const pp=periodOf(mode,shiftPeriod(mode,p.start,-1)), ps=periodStats(daysIn(pp,idx),allN,lastK);
+  const label={semaine:"cette semaine",mois:"ce mois-ci",annee:"cette année"}[mode];
+  if(!s.rec){box.innerHTML=strip+`<div class="panel"><p class="muted">Aucune nuit suivie sur cette période. Utilise les flèches pour changer de ${mode==="annee"?"année":mode}.</p></div>`;return}
+  const dd=k=>new Date(k).toLocaleDateString("fr-FR",{day:"numeric",month:"short"});
+  let cmp="";
+  if(ps.rec)cmp=`Par rapport à ${PREV_NAME[mode]} : ${signedH(s.avg-ps.avg)} par nuit en moyenne (${fmtH(ps.avg)} sur ${ps.rec} nuit${ps.rec>1?"s":""}), dette ${fmtH(ps.debt)} → ${fmtH(s.debt)}.`;
+  const charts={
+    semaine:`<div class="panel"><h3>Heures dormies par nuit</h3><div class="chart"><canvas id="anBars" role="img" aria-label="Heures dormies chaque nuit de la semaine"></canvas></div><p class="muted small">Pointillé vert : ton objectif de ${tgtStr()}. Touche une nuit dans la liste pour l'analyser.</p>
+      <div>${days.map(d=>dayRow(d,lastK)).join("")}</div></div>`,
+    mois:`<div class="panel"><h3>Heures dormies par nuit</h3><div class="chart"><canvas id="anBars" role="img" aria-label="Heures dormies chaque nuit du mois"></canvas></div><p class="muted small">Pointillé vert : ton objectif de ${tgtStr()}.</p></div>
+      <div class="panel"><h3>Semaines du mois</h3>${weeksOfMonth(p,idx,allN,lastK)}</div>
+      <div class="panel"><h3>Toutes les nuits</h3><div>${days.filter(d=>d.k<=lastK).reverse().map(d=>dayRow(d,lastK)).join("")}</div></div>`,
+    annee:`<div class="panel"><h3>Chaque nuit de l'année</h3>
+        <div class="yearwrap"><canvas id="cvYearAxis" aria-hidden="true"></canvas><div class="chart" id="yearScroll"><canvas id="cvYear" role="img" aria-label="Heures dormies chaque nuit de l'année"></canvas></div></div>
+        <p class="small num" id="yearRead">Touche une barre pour voir le détail de la nuit.</p>
+        <div class="legend"><span><span class="dot" style="background:var(--moon)"></span>heures dormies</span><span><span class="dot" style="background:var(--danger)"></span>sous l'objectif</span><span><span class="dot" style="background:var(--fg)"></span>moyenne sur 7 nuits</span><span><span class="dot" style="background:var(--good)"></span>objectif ${tgtStr()}</span></div></div>
+      <div class="panel"><h3>Moyenne par mois</h3><div class="chart"><canvas id="anBars" role="img" aria-label="Durée moyenne de sommeil par mois"></canvas></div>${monthsOfYear(p,idx,allN,lastK)}</div>`
+  };
+  const ins=insightsFor(s,label);
+  box.innerHTML=strip+`
+  <div class="panel">
+    <div class="grid2">
+      ${stat("Moyenne / nuit",fmtH(s.avg),s.avg<CFG.target-0.5?"var(--danger)":"var(--good)")}
+      ${stat("Dette de sommeil",fmtH(s.debt),debtCol(s.debt))}
+      ${stat("Nuits suivies",s.rec+"/"+s.elapsed)}
+      ${stat("Total dormi",fmtH(s.total))}
+      ${stat("Coucher moyen",fmtT(s.bed)+(s.rec>1?" ±"+Math.round(s.bedSd)+" min":""))}
+      ${stat("Réveil moyen",fmtT(s.wake))}
+      ${stat("Score moyen",Math.round(s.score)+"/100")}
+      ${stat("Nuits à l'objectif",s.onTarget+"/"+s.rec)}
+      ${stat("Plus longue · "+dd(s.best.k),fmtH(s.best.h))}
+      ${stat("Plus courte · "+dd(s.worst.k),fmtH(s.worst.h))}
+      ${stat("Ronflement / nuit",Math.round(s.snore)+" min")}
+      ${stat("Qualité ressentie",s.qual!=null?s.qual.toFixed(1)+"/5":"–")}
+    </div>
+    ${cmp?`<p class="small">${cmp}</p>`:""}
+  </div>
+  ${charts[mode]}
+  ${ins.length?`<div class="panel"><h3>À retenir</h3>${ins.map(([t,a])=>`<div class="insight${a?" alert":""}">${esc(t)}</div>`).join("")}</div>`:""}
+  ${habitsHtml(allN)}`;
   requestAnimationFrame(()=>{
-    drawBars($("#cvDur"),durs.map((d,i)=>({v:+d.toFixed(2),l:lab[i],c:d<CFG.target-0.5?cssVar("--danger"):cssVar("--moon")})),{max:Math.max(10,Math.ceil(Math.max(...durs))),ticks:[0,2,4,6,8,10],band:[CFG.target-0.5,CFG.target+1.5]});
-    drawBars($("#cvScore"),scs.map((s,i)=>({v:s,l:lab[i],c:s>=75?cssVar("--good"):s>=55?cssVar("--moon"):cssVar("--danger")})),{max:100,ticks:[0,25,50,75,100],h:150});
-    const smax=Math.max(30,Math.ceil(Math.max(...snoreMins)/30)*30);
-    drawBars($("#cvSnore"),snoreMins.map((s,i)=>({v:s,l:lab[i],c:cssVar("--snore")})),{max:smax,ticks:[0,smax/2,smax],h:140});
+    const hMax=Math.max(10,Math.ceil(Math.max(0,...days.map(d=>d.h||0))));
+    const barCol=h=>h!=null&&h<CFG.target-0.5?cssVar("--danger"):cssVar("--moon");
+    if(mode==="semaine")drawBars($("#anBars"),days.map(d=>({v:d.h,l:new Date(d.k).toLocaleDateString("fr-FR",{weekday:"short"}).replace(".","")+" "+new Date(d.k).getDate(),c:barCol(d.h)})),{max:hMax,ticks:[0,4,8],fmt:t=>t+" h",line:CFG.target,h:160});
+    if(mode==="mois")drawBars($("#anBars"),days.map(d=>({v:d.h,l:String(new Date(d.k).getDate()),c:barCol(d.h)})),{max:hMax,ticks:[0,4,8],fmt:t=>t+" h",line:CFG.target,h:170});
+    if(mode==="annee"){
+      const months=monthAverages(p,idx);
+      drawBars($("#anBars"),months.map(m=>({v:m.avg,l:new Date(m.start).toLocaleDateString("fr-FR",{month:"short"}).replace(".",""),c:barCol(m.avg)})),{max:10,ticks:[0,4,8],fmt:t=>t+" h",line:CFG.target,h:160});
+      drawYear(days);
+      const sc=$("#yearScroll"); if(sc){const i=days.findIndex(d=>d.k>=Math.min(lastK,p.end-1));sc.scrollLeft=Math.max(0,(i<0?days.length:i)*3-sc.clientWidth+40)}
+    }
   });
+}
+function monthAverages(p,idx){const out=[];const y=new Date(p.start).getFullYear();
+  for(let m=0;m<12;m++){const mp={start:new Date(y,m,1).getTime(),end:new Date(y,m+1,1).getTime()};const rec=daysIn(mp,idx).filter(d=>d.h!=null);
+    out.push({start:mp.start,avg:rec.length?mean(rec.map(d=>d.h)):null,n:rec.length,debt:Math.max(0,rec.reduce((s,d)=>s+CFG.target-d.h,0))})}
+  return out;
+}
+function monthsOfYear(p,idx,allN,lastK){
+  return `<div>${monthAverages(p,idx).filter(m=>m.n).reverse().map(m=>`<button type="button" class="weekrow link" data-goto="mois:${m.start}"><span>${cap(new Date(m.start).toLocaleDateString("fr-FR",{month:"long"}))} <span class="muted small">· ${m.n} nuit${m.n>1?"s":""}</span></span><span class="num">${fmtH(m.avg)}</span><span class="num muted" style="min-width:90px;text-align:right">dette ${fmtH(m.debt)}</span></button>`).join("")}</div>`;
+}
+function weeksOfMonth(p,idx,allN,lastK){
+  const rows=[];for(let s=weekStart(p.start);s<p.end;s=shiftDay(s,7)){
+    const st=periodStats(daysIn({start:s,end:shiftDay(s,7)},idx),allN,lastK); if(!st.rec)continue;
+    const e=shiftDay(s,6);
+    rows.push(`<button type="button" class="weekrow link" data-goto="semaine:${s}"><span>Du ${new Date(s).getDate()} au ${new Date(e).toLocaleDateString("fr-FR",{day:"numeric",month:"short"})} <span class="muted small">· ${st.rec} nuit${st.rec>1?"s":""}</span></span><span class="num">${fmtH(st.avg)}</span><span class="num muted" style="min-width:90px;text-align:right">dette ${fmtH(st.debt)}</span></button>`)}
+  return rows.length?`<div>${rows.reverse().join("")}</div>`:`<p class="muted small">Aucune semaine suivie.</p>`;
 }
 
 /* Réglages */
