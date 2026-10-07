@@ -104,6 +104,9 @@ nav button svg{width:22px;height:22px}
 nav button[aria-current=page]{color:var(--moon)}
 .clip{display:flex;flex-direction:column;gap:8px;padding:10px 12px;background:var(--panel2);border-radius:10px;min-width:0}
 .clip audio{width:100%;height:36px;min-width:0}
+.favbtn{background:none;border:0;font-size:1.35rem;line-height:1;color:var(--muted);padding:2px 4px}
+.favbtn[aria-pressed=true]{color:var(--moon)}
+.clip.fav{border:1px solid rgba(242,199,123,.45)}
 .clip.selected{outline:2px solid var(--moon);outline-offset:-2px}
 .typesel{width:auto;padding:3px 6px;font-size:.88rem;font-weight:500;background:var(--panel)}
 .selbox{display:inline-flex;align-items:center;gap:8px;font-size:.9rem;cursor:pointer;padding:4px 0}
@@ -200,7 +203,7 @@ nav button[aria-current=page]{color:var(--moon)}
       <button class="btn" id="exportBtn">Exporter (JSON)</button>
       <label class="btn" for="importFile">Importer</label><input type="file" id="importFile" accept="application/json" hidden>
     </div>
-    <div class="row"><button class="btn danger" id="wipeClips">Supprimer tous les extraits audio</button></div>
+    <div class="row"><button class="btn danger" id="wipeClips">Supprimer tous les extraits audio (sauf favoris)</button></div>
   </div>
   <p class="muted small">Nocturne mesure des sons et des mouvements et en déduit des estimations. Ce n'est pas un dispositif médical : en cas de fatigue persistante, de ronflements forts et quotidiens ou de pauses respiratoires remarquées par quelqu'un, parles-en à un médecin.</p>
 </main>
@@ -659,11 +662,13 @@ async function openNight(id){
   </div>
   ${n.events?.length?`<div class="panel" id="fixPanel"><h3>Corriger la détection</h3>
     <p class="muted small">La détection se trompe parfois. Retire les événements mal classés : ils disparaissent des statistiques, du graphique et des analyses, avec leurs extraits audio de ce type. Pour reclasser un seul extrait, change son type dans la liste ci-dessous.</p>
-    <div class="row">${Object.keys(TYPES).filter(k=>co[k]).map(k=>`<button type="button" class="btn sm" data-purge="${k}">Retirer les ${TYPES[k].l.toLowerCase()}s (${co[k]})</button>`).join("")}</div>
+    <div class="row">${(()=>{const fv=new Set(clips.filter(c=>c.fav).map(c=>c.id));const cnt=k=>n.events.filter(e=>e.type===k&&!fv.has(e.clip)).length;
+      const ks=Object.keys(TYPES).filter(k=>cnt(k));return ks.length?ks.map(k=>`<button type="button" class="btn sm" data-purge="${k}">Retirer les ${TYPES[k].l.toLowerCase()}s (${cnt(k)})</button>`).join(""):`<span class="muted small">Rien à retirer : les événements restants sont liés à des favoris.</span>`})()}</div>
   </div>`:""}
   <div class="panel" id="clipPanel"><h3>Extraits audio <span class="muted small num">(${sorted.length})</span></h3>
     ${sorted.length?`<div class="row" role="group" aria-label="Filtrer les extraits">
         <button type="button" class="chip" data-filter="all" aria-pressed="true">Tous</button>
+        ${sorted.some(c=>c.fav)?`<button type="button" class="chip" data-filter="fav" aria-pressed="false">★ Favoris (${sorted.filter(c=>c.fav).length})</button>`:""}
         ${Object.keys(TYPES).filter(k=>sorted.some(c=>c.type===k)).map(k=>`<button type="button" class="chip" data-filter="${k}" aria-pressed="false"><span class="dot ${TYPES[k].cls}"></span>${TYPES[k].l}</button>`).join("")}
       </div>
       <div class="evlist">${sorted.map((c,i)=>clipRow(c,i,n)).join("")}</div>
@@ -685,12 +690,12 @@ async function openNight(id){
   <div class="row"><button class="btn danger" id="delNight">Supprimer cette nuit</button></div>`);
   requestAnimationFrame(()=>drawNight($("#nightCv"),n));
   $("#closeS").onclick=closeSheet; $("#editForm").onclick=()=>openForm(n);
-  const dn=$("#delNight"); dn.onclick=async()=>{if(dn.dataset.armed){await del("nights",id);for(const c of clips)await del("clips",c.id);closeSheet();renderJournal();toast("Nuit supprimée")}else{dn.dataset.armed=1;dn.textContent="Toucher encore pour confirmer"}};
+  const dn=$("#delNight"); dn.onclick=async()=>{if(clips.some(c=>c.fav)){toast("Cette nuit contient un extrait favori : retire d'abord l'étoile pour pouvoir la supprimer");return}if(dn.dataset.armed){await del("nights",id);for(const c of clips)await del("clips",c.id);closeSheet();renderJournal();toast("Nuit supprimée")}else{dn.dataset.armed=1;dn.textContent="Toucher encore pour confirmer"}};
   document.querySelectorAll("#sheetBody audio[data-clip]").forEach(a=>{const c=clipMap[a.dataset.clip];if(c)a.src=URL.createObjectURL(c.blob)});
   const panel=$("#clipPanel"), selected=new Set();
   const plural=(k,w)=>k+" "+w+(k>1?"s":"");
   const setSel=(cb,on)=>{cb.checked=on;on?selected.add(cb.dataset.sel):selected.delete(cb.dataset.sel);cb.closest(".clip").classList.toggle("selected",on)};
-  const updateBar=()=>{const bar=$("#selBar");if(!bar)return;bar.hidden=!selected.size;$("#selCount").textContent=selected.size;bar.querySelectorAll(".armed").forEach(x=>{x.classList.remove("armed");x.innerHTML=x.dataset.orig});const k=bar.querySelector("[data-act=keep]");k.innerHTML="Supprimer les autres (<span id=\"selOthers\">"+(sorted.length-selected.size)+"</span>)"};
+  const updateBar=()=>{const bar=$("#selBar");if(!bar)return;bar.hidden=!selected.size;$("#selCount").textContent=selected.size;bar.querySelectorAll(".armed").forEach(x=>{x.classList.remove("armed");x.innerHTML=x.dataset.orig});const k=bar.querySelector("[data-act=keep]");k.innerHTML="Supprimer les autres (<span id=\"selOthers\">"+sorted.filter(c=>!selected.has(c.id)&&!c.fav).length+"</span>)"};
   const reopen=async()=>{const st=$("#sheetBody").scrollTop;revokeAudios();await openNight(id);$("#sheetBody").scrollTop=st};
   panel.addEventListener("change",async e=>{
     const ts=e.target.closest("[data-retype]");
@@ -699,23 +704,29 @@ async function openNight(id){
   const fix=$("#fixPanel");
   if(fix)fix.addEventListener("click",async e=>{
     const b=e.target.closest("[data-purge]");if(!b)return;const k=b.dataset.purge;
-    const nEv=n.events.filter(x=>x.type===k).length, nClip=clips.filter(c=>c.type===k).length;
+    const favIds=new Set(clips.filter(c=>c.fav).map(c=>c.id));
+    const nEv=n.events.filter(x=>x.type===k&&!favIds.has(x.clip)).length, nClip=clips.filter(c=>c.type===k&&!c.fav).length;
+    if(!nEv){toast("Ces événements sont liés à des favoris : rien à retirer");return}
     if(!armBtn(b,"Toucher encore : retirer "+nEv+" événement(s)"+(nClip?" et "+nClip+" extrait(s)":"")))return;
     await purgeType(n,k,clips);toast(TYPES[k].l+" : "+nEv+" événement(s) retiré(s)");await reopen()});
   panel.addEventListener("click",async e=>{
     const f=e.target.closest("[data-filter]");
     if(f){panel.querySelectorAll("[data-filter]").forEach(x=>x.setAttribute("aria-pressed",x===f));
-      panel.querySelectorAll(".clip").forEach(c=>c.hidden=f.dataset.filter!=="all"&&c.dataset.type!==f.dataset.filter);return}
+      const fv=f.dataset.filter;panel.querySelectorAll(".clip").forEach(c=>c.hidden=fv==="fav"?c.dataset.fav!=="1":fv!=="all"&&c.dataset.type!==fv);return}
     const b=e.target.closest("[data-act]"); if(!b)return;
     const act=b.dataset.act; let ids=[];
     if(act==="selall"){panel.querySelectorAll(".clip:not([hidden]) [data-sel]").forEach(cb=>setSel(cb,true));updateBar();return}
     if(act==="clear"){panel.querySelectorAll("[data-sel]").forEach(cb=>setSel(cb,false));updateBar();return}
-    if(act==="all"){if(!armBtn(b,"Toucher encore : supprimer les "+sorted.length+" extraits"))return;ids=sorted.map(c=>c.id)}
-    else if(act==="keep"){ids=sorted.filter(c=>!selected.has(c.id)).map(c=>c.id);
-      if(!ids.length){toast("Tous les extraits sont sélectionnés : rien à supprimer");return}
-      if(!armBtn(b,"Toucher encore : supprimer les "+ids.length+" autres"))return}
-    else if(act==="delsel"){ids=[...selected];if(!armBtn(b,"Toucher encore : supprimer "+plural(ids.length,"extrait")))return}
-    else if(act==="del"){if(!armBtn(b,"Confirmer la suppression"))return;ids=[b.closest(".clip").dataset.id]}
+    if(act==="fav"){const c=clipMap[b.closest(".clip").dataset.id];c.fav=!c.fav;await put("clips",c).catch(()=>{});toast(c.fav?"Ajouté aux favoris : protégé contre la suppression":"Retiré des favoris");await reopen();return}
+    const notFav=arr=>arr.filter(x=>!clipMap[x]?.fav), favNote=k=>k?" (favoris conservés)":"";
+    if(act==="all"){ids=notFav(sorted.map(c=>c.id));if(!ids.length){toast("Il ne reste que des favoris : rien à supprimer");return}
+      if(!armBtn(b,"Toucher encore : supprimer "+plural(ids.length,"extrait")+favNote(sorted.length-ids.length)))return}
+    else if(act==="keep"){const all=sorted.filter(c=>!selected.has(c.id)).map(c=>c.id);ids=notFav(all);
+      if(!ids.length){toast(all.length?"Les autres extraits sont des favoris : rien à supprimer":"Tous les extraits sont sélectionnés : rien à supprimer");return}
+      if(!armBtn(b,"Toucher encore : supprimer les "+ids.length+" autres"+favNote(all.length-ids.length)))return}
+    else if(act==="delsel"){ids=notFav([...selected]);if(!ids.length){toast("La sélection ne contient que des favoris : retire d'abord l'étoile");return}
+      if(!armBtn(b,"Toucher encore : supprimer "+plural(ids.length,"extrait")+favNote(selected.size-ids.length)))return}
+    else if(act==="del"){const cid=b.closest(".clip").dataset.id;if(clipMap[cid]?.fav)return;if(!armBtn(b,"Confirmer la suppression"))return;ids=[cid]}
     else return;
     await removeClips(n,ids); toast(plural(ids.length,"extrait")+(ids.length>1?" supprimés":" supprimé"));
     await reopen();
@@ -738,9 +749,10 @@ async function retypeClip(n,c,type){
 }
 /* Retire d'une nuit tous les événements d'un type, et les extraits de ce type */
 async function purgeType(n,type,clips){
-  const ids=clips.filter(c=>c.type===type).map(c=>c.id);
+  const favIds=new Set(clips.filter(c=>c.fav).map(c=>c.id));
+  const ids=clips.filter(c=>c.type===type&&!c.fav).map(c=>c.id);
   for(const id of ids) await del("clips",id).catch(()=>{});
-  n.events=(n.events||[]).filter(e=>e.type!==type);
+  n.events=(n.events||[]).filter(e=>e.type!==type||favIds.has(e.clip));
   const field={ronflement:"snore",parole:"talk",bruit:"noise"}[type];
   for(const m of n.minutes||[]) m[field]=0;
   await put("nights",n).catch(()=>{});
@@ -758,10 +770,10 @@ function clipDur(c,n){
   return Math.round((Math.max(...ev.map(e=>e.t+e.dur*1000))-c.t)/1000+2.5);
 }
 function clipRow(c,i,n){const T=TYPES[c.type]||TYPES.bruit, d=clipDur(c,n);
-  return `<div class="clip" data-id="${c.id}" data-type="${esc(c.type)}">
-    <div class="row between small"><span class="row" style="gap:8px"><span class="dot ${T.cls}"></span><select class="typesel" data-retype="${c.id}" id="type-${c.id}" aria-label="Type de l'extrait">${Object.keys(TYPES).map(k=>`<option value="${k}"${k===c.type?" selected":""}>${TYPES[k].l}</option>`).join("")}</select><span class="num muted">${hm(c.t)}${d?` · ≈ ${d} s`:""}</span></span><span class="num muted">n° ${i+1}</span></div>
+  return `<div class="clip${c.fav?" fav":""}" data-id="${c.id}" data-type="${esc(c.type)}" data-fav="${c.fav?1:0}">
+    <div class="row between small"><span class="row" style="gap:8px"><span class="dot ${T.cls}"></span><select class="typesel" data-retype="${c.id}" id="type-${c.id}" aria-label="Type de l'extrait">${Object.keys(TYPES).map(k=>`<option value="${k}"${k===c.type?" selected":""}>${TYPES[k].l}</option>`).join("")}</select><span class="num muted">${hm(c.t)}${d?` · ≈ ${d} s`:""}</span></span><button type="button" class="favbtn" data-act="fav" aria-pressed="${!!c.fav}" aria-label="${c.fav?"Retirer des favoris":"Ajouter aux favoris"}" title="${c.fav?"Retirer des favoris":"Ajouter aux favoris"}">${c.fav?"★":"☆"}</button></div>
     <audio controls preload="none" data-clip="${c.id}"></audio>
-    <div class="row between"><label class="selbox"><input type="checkbox" data-sel="${c.id}" id="sel-${c.id}"> Sélectionner</label><button type="button" class="btn sm" data-act="del">Supprimer</button></div>
+    <div class="row between"><label class="selbox"><input type="checkbox" data-sel="${c.id}" id="sel-${c.id}"> Sélectionner</label>${c.fav?`<span class="small" style="color:var(--moon)">★ Favori protégé</span>`:`<button type="button" class="btn sm" data-act="del">Supprimer</button>`}</div>
   </div>`}
 
 /* Questionnaire du matin */
@@ -1077,7 +1089,7 @@ $("#importFile").onchange=async e=>{const f=e.target.files[0];if(!f)return;
   try{const d=JSON.parse(await f.text());if(d.app!=="nocturne")throw 0;for(const n of d.nights)await put("nights",n);toast(d.nights.length+" nuits importées")}catch(err){toast("Fichier non reconnu : choisis un export Nocturne (.json).")}
   e.target.value=""};
 const wipe=$("#wipeClips"); wipe.onclick=async()=>{if(!wipe.dataset.armed){wipe.dataset.armed=1;wipe.textContent="Toucher encore pour confirmer";return}
-  await tx("clips","readwrite",s=>s.clear());delete wipe.dataset.armed;wipe.textContent="Supprimer tous les extraits audio";toast("Extraits supprimés");renderSettings()};
+  for(const c of await all("clips"))if(!c.fav)await del("clips",c.id);delete wipe.dataset.armed;wipe.textContent="Supprimer tous les extraits audio (sauf favoris)";toast("Extraits supprimés");renderSettings()};
 
 /* ===================== Interactions de l'écran nuit ===================== */
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>show(b.dataset.view));
