@@ -105,6 +105,7 @@ nav button[aria-current=page]{color:var(--moon)}
 .clip{display:flex;flex-direction:column;gap:8px;padding:10px 12px;background:var(--panel2);border-radius:10px;min-width:0}
 .clip audio{width:100%;height:36px;min-width:0}
 .clip.selected{outline:2px solid var(--moon);outline-offset:-2px}
+.typesel{width:auto;padding:3px 6px;font-size:.88rem;font-weight:500;background:var(--panel)}
 .selbox{display:inline-flex;align-items:center;gap:8px;font-size:.9rem;cursor:pointer;padding:4px 0}
 .selbox input{width:20px;height:20px}
 .selbar{position:sticky;bottom:0;z-index:2;background:var(--ink);border:1px solid var(--moon);border-radius:12px;padding:8px 10px;display:flex;flex-direction:column;gap:6px;box-shadow:0 -8px 20px rgba(0,0,0,.45)}
@@ -656,6 +657,10 @@ async function openNight(id){
       ${f.dreams?`<p class="small"><span class="muted">Rêves :</span> ${esc(f.dreams)}</p>`:""}
       ${f.note?`<p class="small"><span class="muted">Note :</span> ${esc(f.note)}</p>`:""}`:`<p class="muted small">Pas encore renseigné.</p>`}
   </div>
+  ${n.events?.length?`<div class="panel" id="fixPanel"><h3>Corriger la détection</h3>
+    <p class="muted small">La détection se trompe parfois. Retire les événements mal classés : ils disparaissent des statistiques, du graphique et des analyses, avec leurs extraits audio de ce type. Pour reclasser un seul extrait, change son type dans la liste ci-dessous.</p>
+    <div class="row">${Object.keys(TYPES).filter(k=>co[k]).map(k=>`<button type="button" class="btn sm" data-purge="${k}">Retirer les ${TYPES[k].l.toLowerCase()}s (${co[k]})</button>`).join("")}</div>
+  </div>`:""}
   <div class="panel" id="clipPanel"><h3>Extraits audio <span class="muted small num">(${sorted.length})</span></h3>
     ${sorted.length?`<div class="row" role="group" aria-label="Filtrer les extraits">
         <button type="button" class="chip" data-filter="all" aria-pressed="true">Tous</button>
@@ -686,7 +691,17 @@ async function openNight(id){
   const plural=(k,w)=>k+" "+w+(k>1?"s":"");
   const setSel=(cb,on)=>{cb.checked=on;on?selected.add(cb.dataset.sel):selected.delete(cb.dataset.sel);cb.closest(".clip").classList.toggle("selected",on)};
   const updateBar=()=>{const bar=$("#selBar");if(!bar)return;bar.hidden=!selected.size;$("#selCount").textContent=selected.size;bar.querySelectorAll(".armed").forEach(x=>{x.classList.remove("armed");x.innerHTML=x.dataset.orig});const k=bar.querySelector("[data-act=keep]");k.innerHTML="Supprimer les autres (<span id=\"selOthers\">"+(sorted.length-selected.size)+"</span>)"};
-  panel.addEventListener("change",e=>{const cb=e.target.closest("[data-sel]");if(!cb)return;setSel(cb,cb.checked);updateBar()});
+  const reopen=async()=>{const st=$("#sheetBody").scrollTop;revokeAudios();await openNight(id);$("#sheetBody").scrollTop=st};
+  panel.addEventListener("change",async e=>{
+    const ts=e.target.closest("[data-retype]");
+    if(ts){await retypeClip(n,clipMap[ts.dataset.retype],ts.value);toast("Extrait classé en « "+TYPES[ts.value].l+" »");await reopen();return}
+    const cb=e.target.closest("[data-sel]");if(!cb)return;setSel(cb,cb.checked);updateBar()});
+  const fix=$("#fixPanel");
+  if(fix)fix.addEventListener("click",async e=>{
+    const b=e.target.closest("[data-purge]");if(!b)return;const k=b.dataset.purge;
+    const nEv=n.events.filter(x=>x.type===k).length, nClip=clips.filter(c=>c.type===k).length;
+    if(!armBtn(b,"Toucher encore : retirer "+nEv+" événement(s)"+(nClip?" et "+nClip+" extrait(s)":"")))return;
+    await purgeType(n,k,clips);toast(TYPES[k].l+" : "+nEv+" événement(s) retiré(s)");await reopen()});
   panel.addEventListener("click",async e=>{
     const f=e.target.closest("[data-filter]");
     if(f){panel.querySelectorAll("[data-filter]").forEach(x=>x.setAttribute("aria-pressed",x===f));
@@ -703,7 +718,7 @@ async function openNight(id){
     else if(act==="del"){if(!armBtn(b,"Confirmer la suppression"))return;ids=[b.closest(".clip").dataset.id]}
     else return;
     await removeClips(n,ids); toast(plural(ids.length,"extrait")+(ids.length>1?" supprimés":" supprimé"));
-    const st=$("#sheetBody").scrollTop; revokeAudios(); await openNight(id); $("#sheetBody").scrollTop=st;
+    await reopen();
   });
 }
 /* Premier appui : le bouton demande confirmation pendant 5 s. Renvoie true au second appui. */
@@ -713,6 +728,22 @@ function armBtn(btn,label){
   btn.dataset.orig=btn.textContent;btn.classList.add("armed");btn.textContent=label;
   setTimeout(()=>{if(btn.isConnected&&btn.classList.contains("armed")){btn.classList.remove("armed");btn.textContent=btn.dataset.orig}},5000);
   return false;
+}
+/* Change le type d'un extrait et des événements qu'il contient */
+async function retypeClip(n,c,type){
+  if(!c||!TYPES[type])return;
+  c.type=type; await put("clips",c).catch(()=>{});
+  for(const e of n.events||[]) if(e.clip===c.id) e.type=type;
+  await put("nights",n).catch(()=>{});
+}
+/* Retire d'une nuit tous les événements d'un type, et les extraits de ce type */
+async function purgeType(n,type,clips){
+  const ids=clips.filter(c=>c.type===type).map(c=>c.id);
+  for(const id of ids) await del("clips",id).catch(()=>{});
+  n.events=(n.events||[]).filter(e=>e.type!==type);
+  const field={ronflement:"snore",parole:"talk",bruit:"noise"}[type];
+  for(const m of n.minutes||[]) m[field]=0;
+  await put("nights",n).catch(()=>{});
 }
 async function removeClips(n,ids){
   for(const id of ids) await del("clips",id).catch(()=>{});
@@ -728,7 +759,7 @@ function clipDur(c,n){
 }
 function clipRow(c,i,n){const T=TYPES[c.type]||TYPES.bruit, d=clipDur(c,n);
   return `<div class="clip" data-id="${c.id}" data-type="${esc(c.type)}">
-    <div class="row between small"><span class="row" style="gap:8px"><span class="dot ${T.cls}"></span><b style="font-weight:500">${T.l}</b><span class="num muted">${hm(c.t)}${d?` · ≈ ${d} s`:""}</span></span><span class="num muted">n° ${i+1}</span></div>
+    <div class="row between small"><span class="row" style="gap:8px"><span class="dot ${T.cls}"></span><select class="typesel" data-retype="${c.id}" id="type-${c.id}" aria-label="Type de l'extrait">${Object.keys(TYPES).map(k=>`<option value="${k}"${k===c.type?" selected":""}>${TYPES[k].l}</option>`).join("")}</select><span class="num muted">${hm(c.t)}${d?` · ≈ ${d} s`:""}</span></span><span class="num muted">n° ${i+1}</span></div>
     <audio controls preload="none" data-clip="${c.id}"></audio>
     <div class="row between"><label class="selbox"><input type="checkbox" data-sel="${c.id}" id="sel-${c.id}"> Sélectionner</label><button type="button" class="btn sm" data-act="del">Supprimer</button></div>
   </div>`}
