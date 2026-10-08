@@ -107,6 +107,8 @@ nav button[aria-current=page]{color:var(--moon)}
 .favbtn{background:none;border:0;font-size:1.35rem;line-height:1;color:var(--muted);padding:2px 4px}
 .favbtn[aria-pressed=true]{color:var(--moon)}
 .clip.fav{border:1px solid rgba(242,199,123,.45)}
+.player{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.clip.playing{outline:2px solid var(--talk);outline-offset:-2px}
 .clip.selected{outline:2px solid var(--moon);outline-offset:-2px}
 .typesel{width:auto;padding:3px 6px;font-size:.88rem;font-weight:500;background:var(--panel)}
 .selbox{display:inline-flex;align-items:center;gap:8px;font-size:.9rem;cursor:pointer;padding:4px 0}
@@ -671,6 +673,14 @@ async function openNight(id){
         ${sorted.some(c=>c.fav)?`<button type="button" class="chip" data-filter="fav" aria-pressed="false">★ Favoris (${sorted.filter(c=>c.fav).length})</button>`:""}
         ${Object.keys(TYPES).filter(k=>sorted.some(c=>c.type===k)).map(k=>`<button type="button" class="chip" data-filter="${k}" aria-pressed="false"><span class="dot ${TYPES[k].cls}"></span>${TYPES[k].l}</button>`).join("")}
       </div>
+      ${sorted.length>1?`<div class="player">
+        <div class="row" style="gap:6px">
+          <button type="button" class="btn primary sm" data-play="toggle" id="playBtn">▶ Tout écouter (${sorted.length})</button>
+          <button type="button" class="btn sm" data-play="next" id="playNext" hidden>Suivant ⏭</button>
+          <button type="button" class="btn sm" data-play="stop" id="playStop" hidden>■ Arrêter</button>
+        </div>
+        <p class="small num" id="playStatus">Les extraits affichés s'enchaînent dans l'ordre de la nuit. Utilise les filtres pour n'écouter que la parole ou les favoris.</p>
+      </div>`:""}
       <div class="evlist">${sorted.map((c,i)=>clipRow(c,i,n)).join("")}</div>
       <div class="selbar" id="selBar" hidden>
         <p class="small"><b class="num" id="selCount">0</b> sélectionné(s)</p>
@@ -709,10 +719,37 @@ async function openNight(id){
     if(!nEv){toast("Ces événements sont liés à des favoris : rien à retirer");return}
     if(!armBtn(b,"Toucher encore : retirer "+nEv+" événement(s)"+(nClip?" et "+nClip+" extrait(s)":"")))return;
     await purgeType(n,k,clips);toast(TYPES[k].l+" : "+nEv+" événement(s) retiré(s)");await reopen()});
+  /* Lecture enchaînée des extraits visibles */
+  let queue=[],qi=-1,paused=false,plTimer=null;
+  const pl=(sel)=>panel.querySelector(sel);
+  const plStatus=t=>{const s=pl("#playStatus");if(s)s.textContent=t};
+  const plButtons=()=>{const b=pl("#playBtn");if(!b)return;const on=queue.length>0;
+    b.textContent=!on?"▶ Tout écouter ("+panel.querySelectorAll(".clip:not([hidden])").length+")":paused?"▶ Reprendre":"⏸ Pause";
+    pl("#playNext").hidden=!on;pl("#playStop").hidden=!on};
+  const plStop=msg=>{clearTimeout(plTimer);queue.forEach(a=>{a.onended=null;a.pause()});
+    panel.querySelectorAll(".clip.playing").forEach(c=>c.classList.remove("playing"));queue=[];qi=-1;paused=false;plButtons();if(msg)plStatus(msg)};
+  const plNext=()=>{clearTimeout(plTimer);if(queue[qi]){queue[qi].onended=null;queue[qi].pause()}
+    qi++;if(qi>=queue.length){plStop("Lecture terminée : "+queue.length+" extrait(s) écouté(s).");return}
+    const a=queue[qi],c=a.closest(".clip");
+    panel.querySelectorAll(".clip.playing").forEach(x=>x.classList.remove("playing"));c.classList.add("playing");
+    c.scrollIntoView({block:"nearest",behavior:"smooth"});
+    const sel=c.querySelector("[data-retype]");
+    plStatus("Lecture "+(qi+1)+"/"+queue.length+" · "+(sel?TYPES[sel.value].l:"")+" · "+hm(clipMap[c.dataset.id].t));
+    a.onended=()=>{plTimer=setTimeout(plNext,700)};
+    try{a.currentTime=0}catch(err){}
+    a.play().catch(()=>{plTimer=setTimeout(plNext,300)});paused=false;plButtons()};
+  panel.addEventListener("play",e=>{if(queue.length&&e.target!==queue[qi])plStop("Lecture enchaînée arrêtée.")},true);
   panel.addEventListener("click",async e=>{
+    const pb=e.target.closest("[data-play]");
+    if(pb){const k=pb.dataset.play;
+      if(k==="stop"){plStop("Lecture arrêtée.");return}
+      if(k==="next"){plNext();return}
+      if(!queue.length){queue=[...panel.querySelectorAll(".clip:not([hidden]) audio")];qi=-1;if(!queue.length){plStatus("Aucun extrait affiché.");return}plNext();return}
+      const a=queue[qi];if(paused){paused=false;a.play().catch(()=>{});plStatus(pl("#playStatus").textContent.replace(" (en pause)",""))}else{paused=true;a.pause();plStatus(pl("#playStatus").textContent+" (en pause)")}
+      plButtons();return}
     const f=e.target.closest("[data-filter]");
     if(f){panel.querySelectorAll("[data-filter]").forEach(x=>x.setAttribute("aria-pressed",x===f));
-      const fv=f.dataset.filter;panel.querySelectorAll(".clip").forEach(c=>c.hidden=fv==="fav"?c.dataset.fav!=="1":fv!=="all"&&c.dataset.type!==fv);return}
+      const fv=f.dataset.filter;panel.querySelectorAll(".clip").forEach(c=>c.hidden=fv==="fav"?c.dataset.fav!=="1":fv!=="all"&&c.dataset.type!==fv);if(queue.length)plStop("Lecture arrêtée.");plButtons();return}
     const b=e.target.closest("[data-act]"); if(!b)return;
     const act=b.dataset.act; let ids=[];
     if(act==="selall"){panel.querySelectorAll(".clip:not([hidden]) [data-sel]").forEach(cb=>setSel(cb,true));updateBar();return}
