@@ -139,7 +139,7 @@ nav button[aria-current=page]{color:var(--moon)}
 <main id="view-nuit">
   <div class="hero">
     <div class="row between"><div><p class="label">Ce soir</p><h1 id="greet">Prêt pour la nuit</h1></div><div class="moon" aria-hidden="true"></div></div>
-    <p class="small" id="cloudLine" hidden style="color:var(--good)"></p>
+    <div class="small" id="cloudLine" hidden></div>
     <p class="muted" id="lastNight">Aucune nuit enregistrée pour l'instant.</p>
     <button class="btn primary" id="startBtn" style="padding:14px;font-size:1.05rem">Commencer la nuit</button>
     <p class="warn" id="supportWarn" hidden></p>
@@ -332,6 +332,7 @@ function pickMime(){
 }
 
 async function startNight(){
+  if(Sync.ready&&!Sync.user)toast("Attention : tu n'es pas connecté, cette nuit ne sera sauvegardée que sur ce téléphone.");
   if(!navigator.mediaDevices?.getUserMedia){toast("Micro indisponible : ouvre l'app via une adresse https.");return}
   let stream;
   try{stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}})}
@@ -1180,7 +1181,8 @@ const Sync={
       const a=app.getApps().length?app.getApp():app.initializeApp(this.cfg);
       this.fb={A:auth,F:fs,auth:auth.getAuth(a),db:fs.getFirestore(a)};
       this.ready=true;this.err="";
-      auth.onAuthStateChanged(this.fb.auth,u=>{this.user=u;if(u){this.err="";this.alt=false}this.render();if(u)this.full()});
+      this.lastEmail=await get("kv","lastEmail").catch(()=>null);
+      auth.onAuthStateChanged(this.fb.auth,u=>{this.user=u;if(u){this.err="";this.alt=false;if(u.email){this.lastEmail=u.email;put("kv",u.email,"lastEmail",true).catch(()=>{})}}this.render();if(u)this.full()});
       auth.getRedirectResult(this.fb.auth).catch(e=>{this.err=authMsg(e);this.alt=true;this.render()});
     }catch(e){this.err="Impossible de charger Firebase. Vérifie ta connexion et la configuration. ("+(e.message||e)+")"}
     this.render();
@@ -1194,7 +1196,7 @@ const Sync={
   /* Fenêtre de connexion par défaut ; si elle échoue (fréquent sur téléphone), connexion par redirection */
   async signIn(method){
     if(!this.ready)return;
-    const prov=new this.fb.A.GoogleAuthProvider(); prov.setCustomParameters({prompt:"select_account"});
+    const prov=new this.fb.A.GoogleAuthProvider(); prov.setCustomParameters(this.lastEmail?{login_hint:this.lastEmail}:{prompt:"select_account"});
     if(method==="redirect"){this.err="Redirection vers Google…";this.render();
       try{await this.fb.A.signInWithRedirect(this.fb.auth,prov)}catch(e){this.err=authMsg(e);this.render()}return}
     try{await this.fb.A.signInWithPopup(this.fb.auth,prov)}
@@ -1299,8 +1301,11 @@ const Sync={
   render(){
     const box=$("#syncBody"), home=$("#cloudLine"); if(!box)return;
     const p=this.pending();
-    if(home){home.hidden=!this.user;
-      home.textContent=!this.user?"":this.busy?"☁ Sauvegarde en cours…":p?"☁ "+p+" élément(s) en attente de sauvegarde":"☁ Sauvegardé dans le cloud"+(this.last?" · "+relTime(this.last):"")}
+    if(home){
+      if(this.user){home.hidden=false;home.innerHTML=`<span style="color:var(--good)">${this.busy?"☁ Sauvegarde en cours…":p?"☁ "+p+" élément(s) en attente de sauvegarde":"☁ Sauvegardé dans le cloud"+(this.last?" · "+relTime(this.last):"")}</span>`}
+      else if(this.ready){home.hidden=false;home.innerHTML=`<div class="insight alert" style="display:flex;flex-direction:column;gap:8px"><span>Tu n'es pas connecté : tes nuits ne sont plus sauvegardées dans le cloud.</span><button type="button" class="btn sm" id="homeIn">Me reconnecter${this.lastEmail?" ("+esc(this.lastEmail)+")":""}</button></div>`;
+        $("#homeIn").onclick=()=>this.signIn(this.alt?"redirect":undefined)}
+      else home.hidden=true}
     if(!this.cfg){box.innerHTML=`
       <p class="small">Connecte Nocturne à ton projet Firebase pour sauvegarder tes nuits, ressentis et extraits audio, et les retrouver sur un autre appareil.</p>
       <div class="field"><label for="fbCfg">Configuration Firebase (le bloc <span class="mono">firebaseConfig</span> de ton app Web)</label>
@@ -1324,8 +1329,12 @@ const Sync={
       <p class="small">${this.busy||this.progress?esc(this.progress||"Sauvegarde en cours…"):p?`<span style="color:var(--moon)">${p} élément(s) en attente</span>${S?" · envoi après la nuit":""}`:`<span style="color:var(--good)">✓ Tout est sauvegardé</span>`}${this.last?` <span class="muted">· dernière sauvegarde ${relTime(this.last)}</span>`:""}</p>
       ${this.err?`<p class="small" style="color:var(--danger)">${esc(this.err)}</p>`:""}
       <p class="muted small">La sauvegarde est automatique après chaque nuit et chaque modification. Elle ne s'active jamais pendant un enregistrement.</p>
-      <div class="row"><button type="button" class="btn" id="fbNow"${this.busy?" disabled":""}>Synchroniser maintenant</button><button type="button" class="btn sm" id="fbOut">Se déconnecter</button></div>`;
-    $("#fbNow").onclick=async()=>{await this.pull();await this.push()};$("#fbOut").onclick=()=>this.signOut();
+      <div class="row"><button type="button" class="btn" id="fbNow"${this.busy?" disabled":""}>Synchroniser maintenant</button></div>
+      <details class="small"><summary class="muted">Se déconnecter</summary>
+        <p class="small" style="margin-top:8px">Tu restes connecté en permanence, même après avoir fermé l'app. Si tu te déconnectes, les nuits suivantes ne seront plus sauvegardées tant que tu ne te reconnectes pas.${p?` <b style="color:var(--danger)">${p} élément(s) ne sont pas encore sauvegardés.</b>`:""}</p>
+        <button type="button" class="btn sm danger" id="fbOut">Me déconnecter</button></details>`;
+    $("#fbNow").onclick=async()=>{await this.pull();await this.push()};
+    const o=$("#fbOut");o.onclick=()=>{if(o.dataset.armed){this.signOut();return}o.dataset.armed=1;o.textContent="Toucher encore pour confirmer";setTimeout(()=>{if(o.isConnected){delete o.dataset.armed;o.textContent="Me déconnecter"}},5000)};
   },
   async saveConfig(txt){
     const cfg=parseFirebaseConfig(txt);
