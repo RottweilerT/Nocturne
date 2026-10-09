@@ -1180,7 +1180,8 @@ const Sync={
       const a=app.getApps().length?app.getApp():app.initializeApp(this.cfg);
       this.fb={A:auth,F:fs,auth:auth.getAuth(a),db:fs.getFirestore(a)};
       this.ready=true;this.err="";
-      auth.onAuthStateChanged(this.fb.auth,u=>{this.user=u;this.render();if(u)this.full()});
+      auth.onAuthStateChanged(this.fb.auth,u=>{this.user=u;if(u){this.err="";this.alt=false}this.render();if(u)this.full()});
+      auth.getRedirectResult(this.fb.auth).catch(e=>{this.err=authMsg(e);this.alt=true;this.render()});
     }catch(e){this.err="Impossible de charger Firebase. Vérifie ta connexion et la configuration. ("+(e.message||e)+")"}
     this.render();
   },
@@ -1190,10 +1191,14 @@ const Sync={
   schedule(ms){clearTimeout(this.t);this.t=setTimeout(()=>this.push(),ms??4000)},
   ref(...p){return this.fb.F.doc(this.fb.db,"users",this.user.uid,...p)},
 
-  async signIn(){
+  /* Fenêtre de connexion par défaut ; si elle échoue (fréquent sur téléphone), connexion par redirection */
+  async signIn(method){
     if(!this.ready)return;
-    try{await this.fb.A.signInWithPopup(this.fb.auth,new this.fb.A.GoogleAuthProvider())}
-    catch(e){this.err=authMsg(e);this.render()}
+    const prov=new this.fb.A.GoogleAuthProvider(); prov.setCustomParameters({prompt:"select_account"});
+    if(method==="redirect"){this.err="Redirection vers Google…";this.render();
+      try{await this.fb.A.signInWithRedirect(this.fb.auth,prov)}catch(e){this.err=authMsg(e);this.render()}return}
+    try{await this.fb.A.signInWithPopup(this.fb.auth,prov)}
+    catch(e){this.err=authMsg(e);this.alt=true;this.render()}
   },
   async signOut(){if(this.ready){await this.fb.A.signOut(this.fb.auth);this.render()}},
 
@@ -1303,8 +1308,11 @@ const Sync={
       <p class="small">Projet <b class="mono">${esc(this.cfg.projectId)}</b>. Connecte-toi pour activer la sauvegarde automatique.</p>
       <button type="button" class="btn primary" id="fbIn">Se connecter avec Google</button>
       ${this.err?`<p class="small" style="color:var(--danger)">${esc(this.err)}</p>`:""}
+      ${this.alt?`<p class="small">La fenêtre de connexion ne fonctionne pas toujours sur téléphone. Essaie la connexion par redirection : la page s'ouvre sur Google puis revient ici toute seule.</p>
+      <button type="button" class="btn" id="fbRedir">Se connecter par redirection</button>`:""}
       <button type="button" class="btn sm" id="fbForget">Changer de projet Firebase</button>`;
-      $("#fbIn").onclick=()=>this.signIn();$("#fbForget").onclick=()=>this.forget();return}
+      $("#fbIn").onclick=()=>this.signIn();$("#fbForget").onclick=()=>this.forget();
+      const r=$("#fbRedir");if(r)r.onclick=()=>this.signIn("redirect");return}
     box.innerHTML=`
       <p class="small">Connecté : <b>${esc(this.user.email||this.user.displayName||"compte Google")}</b> · projet <span class="mono">${esc(this.cfg.projectId)}</span></p>
       <p class="small">${this.busy||this.progress?esc(this.progress||"Sauvegarde en cours…"):p?`<span style="color:var(--moon)">${p} élément(s) en attente</span>${S?" · envoi après la nuit":""}`:`<span style="color:var(--good)">✓ Tout est sauvegardé</span>`}${this.last?` <span class="muted">· dernière sauvegarde ${relTime(this.last)}</span>`:""}</p>
@@ -1330,7 +1338,8 @@ function authMsg(e){
   const c=e&&e.code||"";
   if(c==="auth/unauthorized-domain")return "Ce site n'est pas autorisé dans Firebase. Ajoute « "+location.hostname+" » dans Authentication → Paramètres → Domaines autorisés.";
   if(c==="auth/popup-blocked")return "La fenêtre de connexion a été bloquée. Autorise les fenêtres pop-up pour ce site, puis réessaie.";
-  if(c==="auth/popup-closed-by-user"||c==="auth/cancelled-popup-request")return "Connexion annulée.";
+  if(c==="auth/popup-closed-by-user"||c==="auth/cancelled-popup-request")return "La fenêtre de connexion s'est fermée avant la fin (auth/popup-closed-by-user).";
+  if(c==="auth/network-request-failed")return "Pas de connexion Internet, ou Google inaccessible. Réessaie.";
   if(c==="auth/operation-not-allowed")return "La connexion Google n'est pas activée dans Firebase (Authentication → Méthode de connexion → Google).";
   return "Connexion impossible : "+(c||e.message||e);
 }
