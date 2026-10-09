@@ -139,6 +139,7 @@ nav button[aria-current=page]{color:var(--moon)}
 <main id="view-nuit">
   <div class="hero">
     <div class="row between"><div><p class="label">Ce soir</p><h1 id="greet">Prêt pour la nuit</h1></div><div class="moon" aria-hidden="true"></div></div>
+    <p class="small" id="cloudLine" hidden style="color:var(--good)"></p>
     <p class="muted" id="lastNight">Aucune nuit enregistrée pour l'instant.</p>
     <button class="btn primary" id="startBtn" style="padding:14px;font-size:1.05rem">Commencer la nuit</button>
     <p class="warn" id="supportWarn" hidden></p>
@@ -199,8 +200,12 @@ nav button[aria-current=page]{color:var(--moon)}
     </div>
   </div>
   <div class="panel">
-    <h3>Données</h3>
-    <p class="muted small">Tout reste dans ce navigateur, sur ce téléphone. Rien n'est envoyé sur Internet. Exporte régulièrement une sauvegarde.</p>
+    <h3>Sauvegarde dans le cloud</h3>
+    <div id="syncBody" class="evlist"></div>
+  </div>
+  <div class="panel">
+    <h3>Données sur ce téléphone</h3>
+    <p class="muted small">Le téléphone garde toujours sa propre copie : l'app fonctionne même sans connexion. Sans sauvegarde cloud, rien ne quitte ce téléphone.</p>
     <p class="small" id="storageInfo"></p>
     <div class="row">
       <button class="btn" id="exportBtn">Exporter (JSON)</button>
@@ -240,6 +245,7 @@ nav button[aria-current=page]{color:var(--moon)}
 
 <div id="sheet" hidden><div class="body" id="sheetBody"></div></div>
 
+<script src="firebase-config.js"></script>
 <script>
 "use strict";
 /* ===================== Stockage (IndexedDB) ===================== */
@@ -266,9 +272,27 @@ async function tx(store,mode,fn){
     t.oncomplete=()=>res(out); t.onerror=()=>rej(t.error); t.onabort=()=>rej(t.error);
   });
 }
-const put=(store,val,key)=>tx(store,"readwrite",s=>key===undefined?s.put(val):s.put(val,key));
+const rawPut=(store,val,key)=>tx(store,"readwrite",s=>key===undefined?s.put(val):s.put(val,key));
 const get=(store,key)=>tx(store,"readonly",s=>s.get(key));
-const del=(store,key)=>tx(store,"readwrite",s=>s.delete(key));
+const rawDel=(store,key)=>tx(store,"readwrite",s=>s.delete(key));
+/* Toute écriture locale (hors synchronisation) est datée et mise en file d'attente pour la sauvegarde cloud */
+const SYNC_STORES=["nights","clips"];
+async function put(store,val,key,fromSync){
+  const synced=SYNC_STORES.includes(store);
+  if(synced&&!fromSync)val.updatedAt=Date.now();
+  const r=await rawPut(store,val,key);
+  if(!fromSync){
+    if(synced){Sync.mark(store,val.id,"put");if(store==="clips"&&val.nightId)Sync.mark("nights",val.nightId,"put")}
+    else if(store==="kv"&&key==="cfg")Sync.mark("cfg","cfg","put");
+  }
+  return r;
+}
+async function del(store,key,fromSync){
+  const prev=store==="clips"&&!fromSync?await get("clips",key).catch(()=>null):null;
+  const r=await rawDel(store,key);
+  if(!fromSync&&SYNC_STORES.includes(store)){Sync.mark(store,key,"del");if(prev&&prev.nightId)Sync.mark("nights",prev.nightId,"put")}
+  return r;
+}
 const all=(store)=>tx(store,"readonly",s=>s.getAll());
 async function clipsOf(nightId){const d=await idb();return new Promise((res,rej)=>{const r=d.transaction("clips").objectStore("clips").index("night").getAll(nightId);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
 
@@ -484,7 +508,7 @@ async function stopNight(){
   S.end=Date.now(); Object.assign(S,estimateSleep(S));
   const id=S.id; await new Promise(r=>setTimeout(r,600)); // laisse le dernier extrait s'écrire
   await saveNight(false); await del("kv","active").catch(()=>{});
-  S=null; A=null;
+  S=null; A=null; Sync.schedule(3000);
   $("#rec").hidden=true; $("#blackout").hidden=true;
   await refreshHome();
   const n=await get("nights",id); if(n) openForm(n);
@@ -1112,6 +1136,7 @@ async function renderSettings(){
   $("#sens").value=CFG.sens; $("#sensVal").textContent=CFG.sens; $("#optClips").checked=CFG.clips; $("#maxClips").value=CFG.maxClips;
   $("#optMotion").checked=CFG.motion; $("#target").value=CFG.target; $("#targetBed").value=CFG.targetBed;
   try{const e=await navigator.storage.estimate();$("#storageInfo").textContent="Espace utilisé : "+(e.usage/1048576).toFixed(1)+" Mo"}catch(e){}
+  Sync.render();
 }
 $("#sens").oninput=e=>{CFG.sens=+e.target.value;$("#sensVal").textContent=CFG.sens;saveCfg()};
 $("#optClips").onchange=e=>{CFG.clips=e.target.checked;saveCfg()};
@@ -1128,6 +1153,192 @@ $("#importFile").onchange=async e=>{const f=e.target.files[0];if(!f)return;
   e.target.value=""};
 const wipe=$("#wipeClips"); wipe.onclick=async()=>{if(!wipe.dataset.armed){wipe.dataset.armed=1;wipe.textContent="Toucher encore pour confirmer";return}
   for(const c of await all("clips"))if(!c.fav)await del("clips",c.id);delete wipe.dataset.armed;wipe.textContent="Supprimer tous les extraits audio (sauf favoris)";toast("Extraits supprimés");renderSettings()};
+
+/* ===================== Sauvegarde Firebase (Firestore) =====================
+   Le téléphone reste la source principale : tout fonctionne hors ligne la nuit.
+   Chaque modification d'une nuit, d'un extrait ou des réglages est mise en file d'attente,
+   puis envoyée dans users/{uid}/… dès que l'on est connecté (jamais pendant un enregistrement).
+   Les extraits audio sont stockés dans Firestore (champ binaire), ce qui évite l'offre payante
+   exigée par Firebase Storage. */
+const FB_VERSION="11.10.0";
+const FB_MAX_CLIP=900*1024;          // un document Firestore est limité à 1 Mio
+const Sync={
+  cfg:null, fb:null, user:null, ready:false, busy:false, err:"", q:{}, synced:{nights:{},clips:{}}, last:null, progress:"",
+
+  async init(){
+    try{const s=await get("kv","sync");if(s){this.q=s.q||{};this.synced=s.synced||{nights:{},clips:{}};this.last=s.last||null}}catch(e){}
+    this.cfg=(window.NOCTURNE_FIREBASE&&window.NOCTURNE_FIREBASE.apiKey)?window.NOCTURNE_FIREBASE:await get("kv","fbcfg").catch(()=>null);
+    if(this.cfg)await this.boot();
+    window.addEventListener("online",()=>this.schedule(1000));
+    document.addEventListener("visibilitychange",()=>{if(!document.hidden)this.schedule(1500)});
+    this.render();
+  },
+  async boot(){
+    try{
+      const base="https://www.gstatic.com/firebasejs/"+FB_VERSION+"/";
+      const [app,auth,fs]=await Promise.all([import(base+"firebase-app.js"),import(base+"firebase-auth.js"),import(base+"firebase-firestore.js")]);
+      const a=app.getApps().length?app.getApp():app.initializeApp(this.cfg);
+      this.fb={A:auth,F:fs,auth:auth.getAuth(a),db:fs.getFirestore(a)};
+      this.ready=true;this.err="";
+      auth.onAuthStateChanged(this.fb.auth,u=>{this.user=u;this.render();if(u)this.full()});
+    }catch(e){this.err="Impossible de charger Firebase. Vérifie ta connexion et la configuration. ("+(e.message||e)+")"}
+    this.render();
+  },
+  persist(){put("kv",{q:this.q,synced:this.synced,last:this.last},"sync",true).catch(()=>{})},
+  mark(store,id,op){this.q[store+"|"+id]=op;this.persist();this.schedule()},
+  pending(){return Object.keys(this.q).length},
+  schedule(ms){clearTimeout(this.t);this.t=setTimeout(()=>this.push(),ms??4000)},
+  ref(...p){return this.fb.F.doc(this.fb.db,"users",this.user.uid,...p)},
+
+  async signIn(){
+    if(!this.ready)return;
+    try{await this.fb.A.signInWithPopup(this.fb.auth,new this.fb.A.GoogleAuthProvider())}
+    catch(e){this.err=authMsg(e);this.render()}
+  },
+  async signOut(){if(this.ready){await this.fb.A.signOut(this.fb.auth);this.render()}},
+
+  /* Première connexion avec ce compte sur cet appareil : tout est à envoyer */
+  async full(){
+    const prev=await get("kv","syncUid").catch(()=>null);
+    if(prev!==this.user.uid){
+      for(const n of await all("nights"))this.q["nights|"+n.id]="put";
+      for(const c of await all("clips"))this.q["clips|"+c.id]="put";
+      this.q["cfg|cfg"]="put"; this.synced={nights:{},clips:{}};
+      await put("kv",this.user.uid,"syncUid",true); this.persist();
+    }
+    await this.pull(); await this.push();
+  },
+
+  /* Envoi de la file d'attente */
+  async push(){
+    if(!this.user||this.busy||S||!navigator.onLine)return;
+    const keys=Object.keys(this.q); if(!keys.length){this.render();return}
+    this.busy=true;this.err="";let done=0;const F=this.fb.F;
+    try{
+      for(const key of keys){
+        const [store,id]=key.split("|"),op=this.q[key];
+        this.progress="Envoi "+(++done)+"/"+keys.length;this.render();
+        if(op==="del"){await F.deleteDoc(this.ref(store,id));delete this.synced[store]?.[id]}
+        else if(store==="cfg"){await F.setDoc(this.ref("meta","cfg"),clean(CFG))}
+        else if(store==="nights"){
+          const n=await get("nights",id); if(!n){delete this.q[key];continue}
+          if(!n.end)continue;                                  // nuit en cours : envoyée à la fin
+          const cl=(await clipsOf(id)).map(c=>[c.id,c.updatedAt||0]);
+          await F.setDoc(this.ref("nights",id),clean({...n,clips:cl}));
+          this.synced.nights[id]=n.updatedAt||0;
+        }else if(store==="clips"){
+          const c=await get("clips",id); if(!c){delete this.q[key];continue}
+          const {blob,...meta}=c; const bytes=new Uint8Array(await blob.arrayBuffer());
+          const docData=clean(meta);
+          if(bytes.length<=FB_MAX_CLIP)docData.data=F.Bytes.fromUint8Array(bytes); else docData.tooBig=true;
+          await F.setDoc(this.ref("clips",id),docData);
+          this.synced.clips[id]=c.updatedAt||0;
+        }
+        delete this.q[key]; this.persist();
+      }
+      this.last=Date.now(); this.persist();
+    }catch(e){this.err="Sauvegarde interrompue : "+(e.code||e.message||e)+". Nouvel essai automatique dans une minute.";this.schedule(60000)}
+    this.busy=false;this.progress="";this.render();
+  },
+
+  /* Récupération : nuits et extraits présents dans le cloud mais absents ou plus anciens ici */
+  async pull(){
+    if(!this.user||S)return;
+    const F=this.fb.F; let added=0;
+    try{
+      this.progress="Lecture du cloud…";this.render();
+      const snap=await F.getDocs(F.collection(this.fb.db,"users",this.user.uid,"nights"));
+      const remoteIds=new Set();
+      for(const d of snap.docs){
+        const r=d.data(); remoteIds.add(r.id);
+        const local=await get("nights",r.id).catch(()=>null);
+        const remoteClips=r.clips||[]; delete r.clips;
+        if(!this.q["nights|"+r.id]&&(!local||(r.updatedAt||0)>(local.updatedAt||0))){await put("nights",r,undefined,true);this.synced.nights[r.id]=r.updatedAt||0;if(!local)added++}
+        // extraits de cette nuit
+        const localClips=await clipsOf(r.id).catch(()=>[]); const lmap=Object.fromEntries(localClips.map(c=>[c.id,c]));
+        const rset=new Set(remoteClips.map(x=>x[0]));
+        for(const [cid,cu] of remoteClips){
+          if(this.q["clips|"+cid])continue;
+          if(!lmap[cid]||(cu||0)>(lmap[cid].updatedAt||0)){
+            this.progress="Téléchargement des extraits…";this.render();
+            const cs=await F.getDoc(this.ref("clips",cid)); if(!cs.exists())continue;
+            const c=cs.data(); if(!c.data)continue;
+            const {data,...meta}=c; await put("clips",{...meta,blob:new Blob([data.toUint8Array()],{type:meta.mime||"audio/webm"})},undefined,true);
+            this.synced.clips[cid]=c.updatedAt||0;
+          }
+        }
+        // extraits supprimés depuis un autre appareil
+        for(const c of localClips) if(this.synced.clips[c.id]!=null&&!rset.has(c.id)&&!this.q["clips|"+c.id]){await del("clips",c.id,true);delete this.synced.clips[c.id]}
+      }
+      // nuits supprimées depuis un autre appareil
+      for(const n of await all("nights")) if(this.synced.nights[n.id]!=null&&!remoteIds.has(n.id)&&!this.q["nights|"+n.id]&&n.end){
+        for(const c of await clipsOf(n.id))await del("clips",c.id,true);
+        await del("nights",n.id,true);delete this.synced.nights[n.id];
+      }
+      // réglages
+      if(!this.q["cfg|cfg"]){const cs=await F.getDoc(this.ref("meta","cfg"));if(cs.exists()){CFG={...DEFAULTS,...cs.data()};await put("kv",CFG,"cfg",true)}}
+      this.persist();
+      if(added)toast(added+" nuit(s) récupérée(s) depuis le cloud");
+      refreshCurrentView();
+    }catch(e){this.err="Lecture du cloud impossible : "+(e.code||e.message||e)}
+    this.progress="";this.render();
+  },
+
+  /* Panneau dans Réglages et ligne d'état sur l'accueil */
+  render(){
+    const box=$("#syncBody"), home=$("#cloudLine"); if(!box)return;
+    const p=this.pending();
+    if(home){home.hidden=!this.user;
+      home.textContent=!this.user?"":this.busy?"☁ Sauvegarde en cours…":p?"☁ "+p+" élément(s) en attente de sauvegarde":"☁ Sauvegardé dans le cloud"+(this.last?" · "+relTime(this.last):"")}
+    if(!this.cfg){box.innerHTML=`
+      <p class="small">Connecte Nocturne à ton projet Firebase pour sauvegarder tes nuits, ressentis et extraits audio, et les retrouver sur un autre appareil.</p>
+      <div class="field"><label for="fbCfg">Configuration Firebase (le bloc <span class="mono">firebaseConfig</span> de ton app Web)</label>
+        <textarea id="fbCfg" spellcheck="false" placeholder='{ apiKey: "…", authDomain: "….firebaseapp.com", projectId: "…", appId: "…" }' style="font-family:var(--mono);font-size:.8rem;min-height:110px"></textarea></div>
+      <button type="button" class="btn primary" id="fbSave">Enregistrer la configuration</button>
+      ${this.err?`<p class="small" style="color:var(--danger)">${esc(this.err)}</p>`:""}`;
+      $("#fbSave").onclick=()=>this.saveConfig($("#fbCfg").value);return}
+    if(!this.ready){box.innerHTML=`<p class="small">${this.err?`<span style="color:var(--danger)">${esc(this.err)}</span>`:"Chargement de Firebase…"}</p>${this.err?`<button type="button" class="btn sm" id="fbForget">Changer la configuration</button>`:""}`;
+      const f=$("#fbForget");if(f)f.onclick=()=>this.forget();return}
+    if(!this.user){box.innerHTML=`
+      <p class="small">Projet <b class="mono">${esc(this.cfg.projectId)}</b>. Connecte-toi pour activer la sauvegarde automatique.</p>
+      <button type="button" class="btn primary" id="fbIn">Se connecter avec Google</button>
+      ${this.err?`<p class="small" style="color:var(--danger)">${esc(this.err)}</p>`:""}
+      <button type="button" class="btn sm" id="fbForget">Changer de projet Firebase</button>`;
+      $("#fbIn").onclick=()=>this.signIn();$("#fbForget").onclick=()=>this.forget();return}
+    box.innerHTML=`
+      <p class="small">Connecté : <b>${esc(this.user.email||this.user.displayName||"compte Google")}</b> · projet <span class="mono">${esc(this.cfg.projectId)}</span></p>
+      <p class="small">${this.busy||this.progress?esc(this.progress||"Sauvegarde en cours…"):p?`<span style="color:var(--moon)">${p} élément(s) en attente</span>${S?" · envoi après la nuit":""}`:`<span style="color:var(--good)">✓ Tout est sauvegardé</span>`}${this.last?` <span class="muted">· dernière sauvegarde ${relTime(this.last)}</span>`:""}</p>
+      ${this.err?`<p class="small" style="color:var(--danger)">${esc(this.err)}</p>`:""}
+      <p class="muted small">La sauvegarde est automatique après chaque nuit et chaque modification. Elle ne s'active jamais pendant un enregistrement.</p>
+      <div class="row"><button type="button" class="btn" id="fbNow"${this.busy?" disabled":""}>Synchroniser maintenant</button><button type="button" class="btn sm" id="fbOut">Se déconnecter</button></div>`;
+    $("#fbNow").onclick=async()=>{await this.pull();await this.push()};$("#fbOut").onclick=()=>this.signOut();
+  },
+  async saveConfig(txt){
+    const cfg=parseFirebaseConfig(txt);
+    if(!cfg){this.err="Configuration non reconnue. Copie tout le bloc firebaseConfig affiché par Firebase (avec apiKey, authDomain, projectId et appId).";this.render();return}
+    await put("kv",cfg,"fbcfg",true);this.cfg=cfg;this.err="";this.render();await this.boot();
+  },
+  async forget(){if(this.ready&&this.user)await this.signOut();await del("kv","fbcfg",true);toast("Recharge la page pour saisir une nouvelle configuration");this.cfg=null;this.ready=false;this.render()}
+};
+function clean(o){return JSON.parse(JSON.stringify(o))}   // Firestore refuse les valeurs undefined
+function parseFirebaseConfig(txt){
+  const m=String(txt||"").match(/\{[\s\S]*\}/); if(!m)return null;
+  let s=m[0].replace(/\/\/[^\n]*/g,"").replace(/'/g,'"').replace(/([{,]\s*)([A-Za-z_]\w*)\s*:/g,'$1"$2":').replace(/,\s*}/g,"}");
+  try{const c=JSON.parse(s);return c.apiKey&&c.projectId&&c.authDomain&&c.appId?c:null}catch(e){return null}
+}
+function authMsg(e){
+  const c=e&&e.code||"";
+  if(c==="auth/unauthorized-domain")return "Ce site n'est pas autorisé dans Firebase. Ajoute « "+location.hostname+" » dans Authentication → Paramètres → Domaines autorisés.";
+  if(c==="auth/popup-blocked")return "La fenêtre de connexion a été bloquée. Autorise les fenêtres pop-up pour ce site, puis réessaie.";
+  if(c==="auth/popup-closed-by-user"||c==="auth/cancelled-popup-request")return "Connexion annulée.";
+  if(c==="auth/operation-not-allowed")return "La connexion Google n'est pas activée dans Firebase (Authentication → Méthode de connexion → Google).";
+  return "Connexion impossible : "+(c||e.message||e);
+}
+function relTime(t){const m=Math.round((Date.now()-t)/60000);if(m<1)return "à l'instant";if(m<60)return "il y a "+m+" min";const h=Math.round(m/60);if(h<24)return "il y a "+h+" h";return new Date(t).toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}
+function refreshCurrentView(){
+  if(S)return;
+  if(!$("#view-nuit").hidden)refreshHome(); else if(!$("#view-journal").hidden)renderJournal(); else if(!$("#view-tendances").hidden)renderTrends(); else if(!$("#view-reglages").hidden)renderSettings();
+}
 
 /* ===================== Interactions de l'écran nuit ===================== */
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>show(b.dataset.view));
@@ -1154,6 +1365,7 @@ async function recover(){
 (async function init(){
   try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
   await loadCfg(); await recover(); await refreshHome();
+  await Sync.init();
 })();
 </script>
 <script>if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));</script>
