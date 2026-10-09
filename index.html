@@ -1182,7 +1182,12 @@ const Sync={
       this.fb={A:auth,F:fs,auth:auth.getAuth(a),db:fs.getFirestore(a)};
       this.ready=true;this.err="";
       this.lastEmail=await get("kv","lastEmail").catch(()=>null);
-      auth.onAuthStateChanged(this.fb.auth,u=>{this.user=u;if(u){this.err="";this.alt=false;if(u.email){this.lastEmail=u.email;put("kv",u.email,"lastEmail",true).catch(()=>{})}}this.render();if(u)this.full()});
+      this.manualOut=await get("kv","manualOut").catch(()=>false);
+      let first=true;
+      auth.onAuthStateChanged(this.fb.auth,u=>{
+        if(!u&&first&&!this.manualOut)this.autoSignIn();   // reconnexion automatique à l'ouverture
+        first=false;
+        this.user=u;if(u){this.err="";this.alt=false;if(u.email){this.lastEmail=u.email;put("kv",u.email,"lastEmail",true).catch(()=>{})}}this.render();if(u)this.full()});
       auth.getRedirectResult(this.fb.auth).catch(e=>{this.err=authMsg(e);this.alt=true;this.render()});
     }catch(e){this.err="Impossible de charger Firebase. Vérifie ta connexion et la configuration. ("+(e.message||e)+")"}
     this.render();
@@ -1196,13 +1201,27 @@ const Sync={
   /* Fenêtre de connexion par défaut ; si elle échoue (fréquent sur téléphone), connexion par redirection */
   async signIn(method){
     if(!this.ready)return;
+    this.manualOut=false; put("kv",false,"manualOut",true).catch(()=>{});
     const prov=new this.fb.A.GoogleAuthProvider(); prov.setCustomParameters(this.lastEmail?{login_hint:this.lastEmail}:{prompt:"select_account"});
     if(method==="redirect"){this.err="Redirection vers Google…";this.render();
       try{await this.fb.A.signInWithRedirect(this.fb.auth,prov)}catch(e){this.err=authMsg(e);this.render()}return}
     try{await this.fb.A.signInWithPopup(this.fb.auth,prov)}
     catch(e){this.err=authMsg(e);this.alt=true;this.render()}
   },
-  async signOut(){if(this.ready){await this.fb.A.signOut(this.fb.auth);this.render()}},
+  async signOut(){if(this.ready){this.manualOut=true;await put("kv",true,"manualOut",true).catch(()=>{});
+    try{window.google?.accounts?.id?.disableAutoSelect()}catch(e){}
+    await this.fb.A.signOut(this.fb.auth);this.render()}},
+  /* Connexion automatique Google (One Tap / FedCM) : reconnecte sans saisie le compte Google du téléphone */
+  async autoSignIn(){
+    const cid=this.cfg&&this.cfg.googleClientId; if(!cid||this.user)return;
+    try{
+      if(!window.google?.accounts?.id)await new Promise((res,rej)=>{const s=document.createElement("script");s.src="https://accounts.google.com/gsi/client";s.async=true;s.onload=res;s.onerror=rej;document.head.appendChild(s)});
+      google.accounts.id.initialize({client_id:cid,auto_select:true,use_fedcm_for_prompt:true,cancel_on_tap_outside:false,itp_support:true,
+        login_hint:this.lastEmail||undefined,context:"signin",
+        callback:async r=>{try{await this.fb.A.signInWithCredential(this.fb.auth,this.fb.A.GoogleAuthProvider.credential(r.credential));toast("Reconnecté automatiquement")}catch(e){this.err=authMsg(e);this.render()}}});
+      google.accounts.id.prompt();
+    }catch(e){/* pas de connexion automatique possible : le bandeau « Me reconnecter » reste affiché */}
+  },
 
   /* Première connexion avec ce compte sur cet appareil : tout est à envoyer */
   async full(){

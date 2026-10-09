@@ -7,5 +7,8 @@ window.NOCTURNE_FIREBASE = {
   projectId: "nocturne-rottweilert",
   storageBucket: "nocturne-rottweilert.firebasestorage.app",
   messagingSenderId: "141592994926",
-  appId: "1:141592994926:web:aa80e8b2432209ef23727f"
+  appId: "1:141592994926:web:aa80e8b2432209ef23727f",
+  // Reconnexion automatique (Google One Tap) : « ID client Web » visible dans
+  // Authentication → Méthode de connexion → Google → Configuration du SDK Web.
+  googleClientId: null
 };
