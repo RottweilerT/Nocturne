@@ -1220,7 +1220,9 @@ const Sync={
     const keys=Object.keys(this.q); if(!keys.length){this.render();return}
     this.busy=true;this.err="";let done=0;const F=this.fb.F;
     try{
+      let failed=0, firstErr="";
       for(const key of keys){
+       try{
         const [store,id]=key.split("|"),op=this.q[key];
         this.progress="Envoi "+(++done)+"/"+keys.length;this.render();
         if(op==="del"){await F.deleteDoc(this.ref(store,id));delete this.synced[store]?.[id]}
@@ -1228,7 +1230,7 @@ const Sync={
         else if(store==="nights"){
           const n=await get("nights",id); if(!n){delete this.q[key];continue}
           if(!n.end)continue;                                  // nuit en cours : envoyée à la fin
-          const cl=(await clipsOf(id)).map(c=>[c.id,c.updatedAt||0]);
+          const cl=(await clipsOf(id)).map(c=>({id:c.id,u:c.updatedAt||0}));   // Firestore refuse les listes imbriquées
           await F.setDoc(this.ref("nights",id),clean({...n,clips:cl}));
           this.synced.nights[id]=n.updatedAt||0;
         }else if(store==="clips"){
@@ -1240,8 +1242,11 @@ const Sync={
           this.synced.clips[id]=c.updatedAt||0;
         }
         delete this.q[key]; this.persist();
+       }catch(e){failed++;firstErr=firstErr||(e.code||e.message||String(e))}
       }
-      this.last=Date.now(); this.persist();
+      if(failed){this.err=failed+" élément(s) non sauvegardé(s) : "+firstErr+". Nouvel essai automatique dans une minute.";this.schedule(60000)}
+      else this.last=Date.now();
+      this.persist();
     }catch(e){this.err="Sauvegarde interrompue : "+(e.code||e.message||e)+". Nouvel essai automatique dans une minute.";this.schedule(60000)}
     this.busy=false;this.progress="";this.render();
   },
@@ -1261,8 +1266,9 @@ const Sync={
         if(!this.q["nights|"+r.id]&&(!local||(r.updatedAt||0)>(local.updatedAt||0))){await put("nights",r,undefined,true);this.synced.nights[r.id]=r.updatedAt||0;if(!local)added++}
         // extraits de cette nuit
         const localClips=await clipsOf(r.id).catch(()=>[]); const lmap=Object.fromEntries(localClips.map(c=>[c.id,c]));
-        const rset=new Set(remoteClips.map(x=>x[0]));
-        for(const [cid,cu] of remoteClips){
+        const rlist=remoteClips.map(x=>Array.isArray(x)?{id:x[0],u:x[1]}:x);
+        const rset=new Set(rlist.map(x=>x.id));
+        for(const {id:cid,u:cu} of rlist){
           if(this.q["clips|"+cid])continue;
           if(!lmap[cid]||(cu||0)>(lmap[cid].updatedAt||0)){
             this.progress="Téléchargement des extraits…";this.render();
