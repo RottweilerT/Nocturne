@@ -10,5 +10,5 @@ window.NOCTURNE_FIREBASE = {
   appId: "1:141592994926:web:aa80e8b2432209ef23727f",
   // Reconnexion automatique (Google One Tap) : « ID client Web » visible dans
   // Authentication → Méthode de connexion → Google → Configuration du SDK Web.
-  googleClientId: null
+  googleClientId: "141592994926-q886d5nbe3cmqlrd8qo0t1j1nptln73c.apps.googleusercontent.com"
 };
