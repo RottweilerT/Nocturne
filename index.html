@@ -63,8 +63,12 @@ canvas{width:100%;display:block}
 
 /* Accueil nuit */
 .hero{padding:0 18px 20px;background:var(--panel);border:1px solid var(--line);border-radius:18px;display:flex;flex-direction:column;gap:14px;overflow:hidden}
-.hero-img{position:relative;margin:0 -18px;aspect-ratio:3/2;max-height:360px;width:auto}
-.hero-img img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 60%;display:block}
+.hero-img{position:relative;margin:0 -18px;aspect-ratio:4/3;max-height:420px;width:auto}
+.hero-img img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 14%;display:block}
+.banner{position:relative;aspect-ratio:21/9;max-height:220px;border-radius:16px;overflow:hidden;border:1px solid var(--line)}
+.banner img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 55%}
+.banner::after{content:"";position:absolute;inset:0;background:linear-gradient(to bottom,rgba(11,13,23,.5),rgba(11,13,23,0) 45%,rgba(11,13,23,.35))}
+.banner h1{position:absolute;z-index:1;left:16px;top:12px;color:#fff8ec;text-shadow:0 1px 10px rgba(0,0,0,.6)}
 .hero-img::after{content:"";position:absolute;inset:0;background:linear-gradient(to bottom,rgba(11,13,23,.55) 0%,rgba(11,13,23,0) 38%,rgba(11,13,23,0) 70%,var(--panel) 100%)}
 .hero-title{position:absolute;z-index:1;top:16px;left:18px;right:18px;text-shadow:0 1px 10px rgba(0,0,0,.6)}
 .hero-title .label{color:#f3e3c4}
@@ -145,7 +149,7 @@ nav button[aria-current=page]{color:var(--moon)}
 <main id="view-nuit">
   <div class="hero">
     <div class="hero-img">
-      <img src="hero.jpg" alt="Un rottweiler endormi sur un rocher au coucher du soleil, au-dessus d'un lac et des montagnes" width="1400" height="933">
+      <img src="night.jpg" alt="Un rottweiler endormi sur un rocher sous la pleine lune, au-dessus d'un lac et des montagnes" width="1200" height="1200">
       <div class="hero-title"><p class="label">Ce soir</p><h1 id="greet">Prêt pour la nuit</h1></div>
     </div>
     <div class="small" id="cloudLine" hidden></div>
@@ -176,7 +180,7 @@ nav button[aria-current=page]{color:var(--moon)}
 </main>
 
 <main id="view-tendances" hidden>
-  <h1>Analyse</h1>
+  <div class="banner"><img src="sunset.jpg" alt="Un rottweiler endormi au coucher du soleil, au-dessus d'un lac et des montagnes" width="1400" height="933" loading="lazy"><h1>Analyse</h1></div>
   <div class="seg" role="group" aria-label="Période analysée">
     <button type="button" data-mode="nuit" aria-pressed="false">Nuit</button>
     <button type="button" data-mode="semaine" aria-pressed="true">Semaine</button>
