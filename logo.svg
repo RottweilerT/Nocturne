@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>Nocturne : rottweiler endormi dans un croissant de lune</title>
+  <defs>
+    <radialGradient id="sky" cx="50%" cy="30%" r="80%">
+      <stop offset="0" stop-color="#232a4d"/>
+      <stop offset="1" stop-color="#0b0d17"/>
+    </radialGradient>
+    <linearGradient id="moon" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe2a3"/>
+      <stop offset="1" stop-color="#e3a453"/>
+    </linearGradient>
+    <linearGradient id="fur" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a2433"/>
+      <stop offset=".35" stop-color="#15111c"/>
+      <stop offset="1" stop-color="#0c0a10"/>
+    </linearGradient>
+    <linearGradient id="tan" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d9893f"/>
+      <stop offset="1" stop-color="#a85f22"/>
+    </linearGradient>
+    <mask id="crescent">
+      <circle cx="256" cy="270" r="200" fill="#fff"/>
+      <circle cx="256" cy="196" r="192" fill="#000"/>
+    </mask>
+    <filter id="rim" x="-10%" y="-20%" width="120%" height="140%">
+      <feDropShadow dx="0" dy="-2.2" stdDeviation="1.4" flood-color="#ffd890" flood-opacity=".75"/>
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#000" flood-opacity=".35"/>
+    </filter>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
+  </defs>
+
+  <!-- Ciel -->
+  <rect width="512" height="512" rx="112" fill="url(#sky)"/>
+  <g fill="#f6e7c6">
+    <circle cx="112" cy="104" r="2.4"/><circle cx="398" cy="88" r="3"/><circle cx="352" cy="150" r="1.6"/>
+    <circle cx="168" cy="164" r="1.6"/><circle cx="436" cy="170" r="2"/><circle cx="76" cy="176" r="1.6"/>
+    <circle cx="250" cy="74" r="2"/><circle cx="300" cy="118" r="1.3"/>
+  </g>
+
+  <!-- Croissant de lune en berceau -->
+  <g transform="rotate(-8 256 300)">
+    <rect width="512" height="512" fill="#f2c77b" mask="url(#crescent)" filter="url(#glow)" opacity=".45"/>
+    <rect width="512" height="512" fill="url(#moon)" mask="url(#crescent)"/>
+    <g mask="url(#crescent)" fill="#c98b45" opacity=".35">
+      <circle cx="170" cy="410" r="11"/><circle cx="330" cy="432" r="8"/><circle cx="398" cy="380" r="6"/>
+    </g>
+  </g>
+
+  <!-- Rottweiler couché, tête sur les pattes -->
+  <g transform="rotate(-8 256 300) translate(262 352) scale(1.28) translate(-262 -352)" filter="url(#rim)">
+    <!-- queue -->
+    <path d="M378 326 q14 -6 18 4 q-6 8 -18 6 z" fill="url(#fur)"/>
+    <!-- arrière-train et dos -->
+    <ellipse cx="334" cy="340" rx="50" ry="42" fill="url(#fur)"/>
+    <ellipse cx="282" cy="346" rx="86" ry="38" fill="url(#fur)"/>
+    <!-- épaule -->
+    <ellipse cx="228" cy="348" rx="42" ry="34" fill="url(#fur)"/>
+    <!-- patte arrière -->
+    <path d="M330 368 q34 -4 52 6 q4 8 -6 10 l-44 0 q-10 -8 -2 -16 z" fill="url(#tan)"/>
+    <ellipse cx="370" cy="378" rx="16" ry="8" fill="url(#tan)"/>
+    <!-- pattes avant allongées -->
+    <rect x="124" y="360" width="104" height="18" rx="9" fill="url(#tan)"/>
+    <rect x="138" y="372" width="96" height="16" rx="8" fill="#b9692a"/>
+    <g stroke="#7a4317" stroke-width="2" stroke-linecap="round">
+      <path d="M134 364 v10"/><path d="M142 364 v10"/><path d="M148 376 v9"/><path d="M156 376 v9"/>
+    </g>
+    <!-- poitrail feu -->
+    <path d="M210 352 q16 -6 30 4 q-8 20 -20 22 q-12 -8 -10 -26 z" fill="url(#tan)"/>
+    <!-- tête -->
+    <ellipse cx="194" cy="324" rx="42" ry="34" fill="url(#fur)"/>
+    <!-- museau -->
+    <path d="M168 320 q-26 -2 -34 16 q-2 14 14 18 q22 4 32 -8 z" fill="url(#fur)"/>
+    <path d="M140 340 q8 14 30 12 q14 -2 16 -12 q-24 6 -46 0 z" fill="url(#tan)"/>
+    <path d="M150 326 q8 6 4 16" stroke="#3a2b2f" stroke-width="2" fill="none" stroke-linecap="round"/>
+    <!-- truffe -->
+    <ellipse cx="138" cy="331" rx="8" ry="6" fill="#050406"/>
+    <ellipse cx="135" cy="329" rx="2.5" ry="1.6" fill="#5b5566"/>
+    <!-- joue feu -->
+    <ellipse cx="184" cy="344" rx="12" ry="7" fill="url(#tan)"/>
+    <!-- sourcil feu et œil fermé -->
+    <ellipse cx="178" cy="312" rx="6" ry="4.5" fill="#d9893f"/>
+    <path d="M168 323 q8 6 16 0" stroke="#d9893f" stroke-width="2.6" fill="none" stroke-linecap="round"/>
+    <!-- oreille tombante -->
+    <path d="M198 296 q24 -6 32 10 q4 20 -12 30 q-10 -12 -20 -40 z" fill="#0a080d"/><path d="M204 300 q16 -2 20 8" stroke="#3a3346" stroke-width="2" fill="none" stroke-linecap="round"/>
+  </g>
+
+  <!-- z z z -->
+  <g fill="none" stroke="#f6e7c6" stroke-linecap="round" stroke-linejoin="round" opacity=".85" transform="translate(-6 -14)">
+    <path d="M128 252 h14 l-14 14 h14" stroke-width="3"/>
+    <path d="M150 226 h11 l-11 11 h11" stroke-width="2.4"/>
+    <path d="M168 206 h8 l-8 8 h8" stroke-width="2"/>
+  </g>
+</svg>
