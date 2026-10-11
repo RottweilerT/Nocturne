@@ -62,7 +62,13 @@ canvas{width:100%;display:block}
 .chart{overflow-x:auto}
 
 /* Accueil nuit */
-.hero{padding:22px 18px;background:radial-gradient(120% 90% at 85% 0%,#2a2540 0%,var(--panel) 60%);border:1px solid var(--line);border-radius:18px;display:flex;flex-direction:column;gap:14px}
+.hero{padding:0 18px 20px;background:var(--panel);border:1px solid var(--line);border-radius:18px;display:flex;flex-direction:column;gap:14px;overflow:hidden}
+.hero-img{position:relative;margin:0 -18px;aspect-ratio:3/2;max-height:360px;width:auto}
+.hero-img img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 60%;display:block}
+.hero-img::after{content:"";position:absolute;inset:0;background:linear-gradient(to bottom,rgba(11,13,23,.55) 0%,rgba(11,13,23,0) 38%,rgba(11,13,23,0) 70%,var(--panel) 100%)}
+.hero-title{position:absolute;z-index:1;top:16px;left:18px;right:18px;text-shadow:0 1px 10px rgba(0,0,0,.6)}
+.hero-title .label{color:#f3e3c4}
+.hero-title h1{color:#fff8ec}
 .moon{width:56px;height:56px;border-radius:50%;box-shadow:inset -14px 6px 0 0 var(--moon);transform:rotate(-20deg)}
 .checklist{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px;color:var(--muted);font-size:.9rem}
 
@@ -138,7 +144,10 @@ nav button[aria-current=page]{color:var(--moon)}
 
 <main id="view-nuit">
   <div class="hero">
-    <div class="row between"><div><p class="label">Ce soir</p><h1 id="greet">Prêt pour la nuit</h1></div><div class="moon" aria-hidden="true"></div></div>
+    <div class="hero-img">
+      <img src="hero.jpg" alt="Un rottweiler endormi sur un rocher au coucher du soleil, au-dessus d'un lac et des montagnes" width="1400" height="933">
+      <div class="hero-title"><p class="label">Ce soir</p><h1 id="greet">Prêt pour la nuit</h1></div>
+    </div>
     <div class="small" id="cloudLine" hidden></div>
     <p class="muted" id="lastNight">Aucune nuit enregistrée pour l'instant.</p>
     <button class="btn primary" id="startBtn" style="padding:14px;font-size:1.05rem">Commencer la nuit</button>
