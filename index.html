@@ -1184,7 +1184,8 @@ const Sync={
     try{const s=await get("kv","sync");if(s){this.q=s.q||{};this.synced=s.synced||{nights:{},clips:{}};this.last=s.last||null}}catch(e){}
     this.cfg=(window.NOCTURNE_FIREBASE&&window.NOCTURNE_FIREBASE.apiKey)?window.NOCTURNE_FIREBASE:await get("kv","fbcfg").catch(()=>null);
     if(this.cfg)await this.boot();
-    window.addEventListener("online",()=>this.schedule(1000));
+    window.addEventListener("online",()=>{if(this.cfg&&!this.ready)this.boot();else this.schedule(1000);this.render()});
+    window.addEventListener("offline",()=>this.render());
     document.addEventListener("visibilitychange",()=>{if(!document.hidden)this.schedule(1500)});
     this.render();
   },
@@ -1203,7 +1204,7 @@ const Sync={
         first=false;
         this.user=u;if(u){this.err="";this.alt=false;if(u.email){this.lastEmail=u.email;put("kv",u.email,"lastEmail",true).catch(()=>{})}}this.render();if(u)this.full()});
       auth.getRedirectResult(this.fb.auth).catch(e=>{this.err=authMsg(e);this.alt=true;this.render()});
-    }catch(e){this.err="Impossible de charger Firebase. Vérifie ta connexion et la configuration. ("+(e.message||e)+")"}
+    }catch(e){this.err=navigator.onLine?"Impossible de charger Firebase. Vérifie ta connexion et la configuration. ("+(e.message||e)+")":""}
     this.render();
   },
   persist(){put("kv",{q:this.q,synced:this.synced,last:this.last},"sync",true).catch(()=>{})},
@@ -1335,7 +1336,8 @@ const Sync={
     const box=$("#syncBody"), home=$("#cloudLine"); if(!box)return;
     const p=this.pending();
     if(home){
-      if(this.user){home.hidden=false;home.innerHTML=`<span style="color:var(--good)">${this.busy?"☁ Sauvegarde en cours…":p?"☁ "+p+" élément(s) en attente de sauvegarde":"☁ Sauvegardé dans le cloud"+(this.last?" · "+relTime(this.last):"")}</span>`}
+      if(!navigator.onLine){home.hidden=false;home.innerHTML=`<span style="color:var(--moon)">✈ Hors ligne : l'app fonctionne normalement.${this.cfg?" Tes nuits seront sauvegardées dans le cloud au retour du réseau.":""}${p?" ("+p+" en attente)":""}</span>`}
+      else if(this.user){home.hidden=false;home.innerHTML=`<span style="color:var(--good)">${this.busy?"☁ Sauvegarde en cours…":p?"☁ "+p+" élément(s) en attente de sauvegarde":"☁ Sauvegardé dans le cloud"+(this.last?" · "+relTime(this.last):"")}</span>`}
       else if(this.ready){home.hidden=false;home.innerHTML=`<div class="insight alert" style="display:flex;flex-direction:column;gap:8px"><span>Tu n'es pas connecté : tes nuits ne sont plus sauvegardées dans le cloud.</span><button type="button" class="btn sm" id="homeIn">Me reconnecter${this.lastEmail?" ("+esc(this.lastEmail)+")":""}</button></div>`;
         $("#homeIn").onclick=()=>this.signIn(this.alt?"redirect":undefined)}
       else home.hidden=true}
@@ -1346,6 +1348,7 @@ const Sync={
       <button type="button" class="btn primary" id="fbSave">Enregistrer la configuration</button>
       ${this.err?`<p class="small" style="color:var(--danger)">${esc(this.err)}</p>`:""}`;
       $("#fbSave").onclick=()=>this.saveConfig($("#fbCfg").value);return}
+    if(!this.ready&&!navigator.onLine){box.innerHTML=`<p class="small" style="color:var(--moon)">✈ Hors ligne. La sauvegarde reprendra automatiquement au retour du réseau.${p?" "+p+" élément(s) en attente.":""}</p>`;return}
     if(!this.ready){box.innerHTML=`<p class="small">${this.err?`<span style="color:var(--danger)">${esc(this.err)}</span>`:"Chargement de Firebase…"}</p>${this.err?`<button type="button" class="btn sm" id="fbForget">Changer la configuration</button>`:""}`;
       const f=$("#fbForget");if(f)f.onclick=()=>this.forget();return}
     if(!this.user){box.innerHTML=`
