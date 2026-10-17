@@ -220,6 +220,7 @@ nav button[aria-current=page]{color:var(--moon)}
   <div class="panel">
     <h3>Données sur ce téléphone</h3>
     <p class="muted small">Le téléphone garde toujours sa propre copie : l'app fonctionne même sans connexion. Sans sauvegarde cloud, rien ne quitte ce téléphone.</p>
+    <p class="small" id="offlineInfo"></p>
     <p class="small" id="storageInfo"></p>
     <div class="row">
       <button class="btn" id="exportBtn">Exporter (JSON)</button>
@@ -1152,6 +1153,15 @@ async function renderSettings(){
   $("#optMotion").checked=CFG.motion; $("#target").value=CFG.target; $("#targetBed").value=CFG.targetBed;
   try{const e=await navigator.storage.estimate();$("#storageInfo").textContent="Espace utilisé : "+(e.usage/1048576).toFixed(1)+" Mo"}catch(e){}
   Sync.render();
+  offlineStatus();
+}
+/* Vérifie que la copie hors ligne est complète sur ce téléphone */
+async function offlineStatus(){
+  const el=$("#offlineInfo"); if(!el)return;
+  let ok=false;
+  try{ok=!!(navigator.serviceWorker&&navigator.serviceWorker.controller)&&!!(await caches.match(new URL("index.html",location.href).href))&&!!(await caches.match(new URL("night.jpg",location.href).href))}catch(e){}
+  el.innerHTML=ok?'<span style="color:var(--good)">✓ Prêt pour le hors ligne : l\'app fonctionne sans Wi-Fi ni 4G.</span>'
+    :'<span style="color:var(--moon)">⏳ Copie hors ligne en cours de préparation. Garde l\'app ouverte avec Internet quelques secondes, puis recharge la page.</span>';
 }
 $("#sens").oninput=e=>{CFG.sens=+e.target.value;$("#sensVal").textContent=CFG.sens;saveCfg()};
 $("#optClips").onchange=e=>{CFG.clips=e.target.checked;saveCfg()};
@@ -1428,6 +1438,6 @@ async function recover(){
   await Sync.init();
 })();
 </script>
-<script>if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));</script>
+<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});</script>
 </body>
 </html>
