@@ -220,6 +220,9 @@ nav button[aria-current=page]{color:var(--moon)}
     <div class="field"><label for="sens">Sensibilité : déclenchement à <span id="sensVal" class="num"></span> dB au-dessus du bruit de fond</label>
       <input type="range" id="sens" min="6" max="24" step="1"><span class="muted small">Plus bas = plus sensible. Monte la valeur si un ventilateur ou la rue déclenche trop d'événements.</span></div>
     <label class="row"><input type="checkbox" id="optClips"> Enregistrer des extraits audio des événements</label>
+    <div class="field"><label for="optKeep">Extraits à garder</label>
+      <select id="optKeep"><option value="parole">Seulement quand je parle, même des mots inintelligibles</option><option value="tout">Tous les sons détectés (ronflements, bruits…)</option></select>
+      <span class="muted small">Les ronflements et les bruits restent comptés dans les statistiques ; seul leur audio n'est pas gardé.</span></div>
     <div class="field"><label for="maxClips">Extraits maximum par nuit</label><input type="number" id="maxClips" min="5" max="300" step="5"></div>
     <label class="row"><input type="checkbox" id="optMotion"> Utiliser l'accéléromètre (téléphone posé sur le matelas)</label>
   </div>
@@ -243,6 +246,8 @@ nav button[aria-current=page]{color:var(--moon)}
       <button class="btn" id="exportBtn">Exporter (JSON)</button>
       <label class="btn" for="importFile">Importer</label><input type="file" id="importFile" accept="application/json" hidden>
     </div>
+    <div class="row"><button class="btn" id="reanalyzeAll">Réanalyser tous les extraits</button><button class="btn danger" id="keepSpeechAll">Ne garder que la parole (toutes les nuits)</button></div>
+    <p class="small muted" id="reanalyzeInfo">La réanalyse réécoute chaque extrait pour repérer la parole, y compris les marmonnements et les mots inintelligibles. Les favoris ne sont jamais supprimés.</p>
     <div class="row"><button class="btn danger" id="wipeClips">Supprimer tous les extraits audio (sauf favoris)</button></div>
   </div>
   <p class="muted small">Nocturne mesure des sons et des mouvements et en déduit des estimations. Ce n'est pas un dispositif médical : en cas de fatigue persistante, de ronflements forts et quotidiens ou de pauses respiratoires remarquées par quelqu'un, parles-en à un médecin.</p>
@@ -329,7 +334,7 @@ const all=(store)=>tx(store,"readonly",s=>s.getAll());
 async function clipsOf(nightId){const d=await idb();return new Promise((res,rej)=>{const r=d.transaction("clips").objectStore("clips").index("night").getAll(nightId);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
 
 /* ===================== Réglages ===================== */
-const DEFAULTS={sens:12,clips:true,maxClips:80,motion:false,target:8,targetBed:"23:00"};
+const DEFAULTS={sens:12,clips:true,maxClips:80,motion:false,target:8,targetBed:"23:00",keep:"parole"};
 let CFG={...DEFAULTS};
 async function loadCfg(){try{const c=await get("kv","cfg");if(c)CFG={...DEFAULTS,...c}}catch(e){}}
 function saveCfg(){put("kv",CFG,"cfg").catch(()=>{})}
@@ -423,6 +428,62 @@ function analyseFrame(td,fd,sampleRate,fftSize,prevSpec){
   return {db,low:tot?low/tot:0,voice:tot?voice/tot:0,high:tot?high/tot:0,flux,spec,pw:rms*rms};
 }
 
+/* Voisement : la voix (même marmonnée) est périodique entre 70 et 400 Hz ; souffle, chocs et
+   bruits ne le sont pas, et la vibration du palais dans un ronflement est le plus souvent plus grave.
+   Autocorrélation normalisée sur le signal ramené à ~16 kHz. Renvoie {r: 0..1, f0: Hz}. */
+function voicing(td,sr){
+  const k=Math.max(1,Math.round(sr/16000)), fs=sr/k, n=Math.floor(td.length/k);
+  const x=new Float32Array(n); let m=0;
+  for(let i=0;i<n;i++){let s=0;for(let j=0;j<k;j++)s+=td[i*k+j];x[i]=s/k;m+=x[i]}
+  m/=n; for(let i=0;i<n;i++)x[i]-=m;
+  const lagMin=Math.floor(fs/400), lagMax=Math.min(Math.ceil(fs/70),Math.floor(n/2));
+  const L=n-lagMax; if(L<64)return {r:0,f0:0};
+  let e0=0; for(let i=0;i<L;i++)e0+=x[i]*x[i]; if(e0<1e-10)return {r:0,f0:0};
+  let best=0,bl=0;
+  for(let l=lagMin;l<=lagMax;l++){let c=0,e1=0;for(let i=0;i<L;i++){c+=x[i]*x[i+l];e1+=x[i+l]*x[i+l]}
+    const r=c/Math.sqrt(e0*e1+1e-12); if(r>best){best=r;bl=l}}
+  return {r:best,f0:bl?fs/bl:0};
+}
+/* Caractéristiques « parole » d'un événement : part de trames voisées, hauteur, intonation, syllabes */
+function speechFeatures(dbs,rs,f0s,dur){
+  const mx=Math.max(...dbs), act=[]; for(let i=0;i<dbs.length;i++) if(dbs[i]>mx-20&&rs[i]!=null) act.push(i);
+  const vo=act.filter(i=>rs[i]>=0.5), voicedFrac=act.length?vo.length/act.length:0;
+  const f=vo.map(i=>f0s[i]).sort((a,b)=>a-b), medF0=f.length?f[Math.floor(f.length/2)]:0;
+  const f0Rel=f.length>2?sd(f)/Math.max(medF0,1):0;
+  let peaks=0,lastPeak=-99;
+  for(let i=2;i<dbs.length-2;i++){
+    if(dbs[i]>=dbs[i-1]&&dbs[i]>=dbs[i+1]&&dbs[i]>=dbs[i-2]&&dbs[i]>=dbs[i+2]){
+      let mn=dbs[i]; for(let j=Math.max(0,i-6);j<=Math.min(dbs.length-1,i+6);j++) mn=Math.min(mn,dbs[j]);
+      if(dbs[i]-mn>=4 && i-lastPeak>=3){peaks++;lastPeak=i}}
+  }
+  const pps=peaks/Math.max(dur,0.1);
+  // voix : voisée, hauteur de voix humaine, avec des syllabes ou une intonation qui varie
+  // un ton électronique (bip, alarme, notification) est parfaitement périodique et de hauteur fixe
+  const rv=vo.map(i=>rs[i]).sort((a,b)=>a-b), medR=rv.length?rv[Math.floor(rv.length/2)]:0;
+  const pureTone=medR>0.985&&f0Rel<0.012;
+  const speech=!pureTone&&dur>=0.5&&voicedFrac>=0.3&&medF0>=75&&medF0<=400&&(pps>=0.9||f0Rel>=0.07);
+  return {voicedFrac,medF0,f0Rel,pps,medR,pureTone,speech};
+}
+/* Réécoute d'un extrait déjà enregistré pour y chercher de la parole */
+async function analyzeClipBlob(blob){
+  const AC=window.AudioContext||window.webkitAudioContext; const ac=new AC();
+  try{
+    const buf=await ac.decodeAudioData(await blob.arrayBuffer()); const sr=buf.sampleRate, x=buf.getChannelData(0);
+    const W=2048, hop=Math.round(sr*FRAME_MS/1000), dbs=[], rs=[], f0s=[];
+    for(let s=0;s+W<=x.length;s+=hop){const fr=x.subarray(s,s+W);let e=0;for(let i=0;i<W;i++)e+=fr[i]*fr[i];
+      dbs.push(20*Math.log10(Math.sqrt(e/W)+1e-9)); const v=voicing(fr,sr); rs.push(v.r); f0s.push(v.f0)}
+    if(dbs.length<6)return {speech:false,voicedFrac:0};
+    // plusieurs phrases peuvent se suivre dans un extrait : on cherche le meilleur passage de 3 s
+    const win=Math.round(3000/FRAME_MS); let best={speech:false,voicedFrac:0};
+    for(let s=0;s<dbs.length;s+=Math.round(win/2)){
+      const e=Math.min(dbs.length,s+win); const f=speechFeatures(dbs.slice(s,e),rs.slice(s,e),f0s.slice(s,e),(e-s)*FRAME_MS/1000);
+      if(f.speech){best=f;break} if(f.voicedFrac>best.voicedFrac)best=f;
+      if(e===dbs.length)break;
+    }
+    return best;
+  }finally{ac.close().catch(()=>{})}
+}
+
 /* Classement d'un événement terminé (règles simples, assumées comme estimations) */
 function classify(ev,lastLowT){
   const dur=ev.dur, low=mean(ev.low), voice=mean(ev.voice);
@@ -435,11 +496,13 @@ function classify(ev,lastLowT){
     }
   }
   const pps=peaks/Math.max(dur,0.1);
+  const sp=speechFeatures(ev.dbs,ev.vr,ev.f0,dur);
   let type="bruit", isLow=false;
-  if(dur<0.6) type="bruit";
+  if(sp.speech) type="parole";                                   // voix, même marmonnée
+  else if(dur<0.6) type="bruit";
   else if(low>0.5 && voice<0.42 && dur<=5){isLow=true; type=(ev.t-lastLowT<12000)?"ronflement":"bruit";}
   else if(voice>0.4 && dur>=0.9 && pps>=1.2 && pps<=8) type="parole";
-  return {type,isLow,pps,low,voice};
+  return {type,isLow,pps,low,voice,speech:sp};
 }
 
 function tick(){
@@ -462,7 +525,8 @@ function tick(){
     if(active){ A.pending=(A.pending||0)+1; if(A.pending>=4) beginEvent(now-3*FRAME_MS,fr,above); }
     else A.pending=0;
   }else{
-    ev.dbs.push(fr.db); ev.low.push(fr.low); ev.voice.push(fr.voice); ev.peak=Math.max(ev.peak,above);
+    const v=voicing(td,A.ctx.sampleRate);
+    ev.dbs.push(fr.db); ev.low.push(fr.low); ev.voice.push(fr.voice); ev.vr.push(v.r); ev.f0.push(v.f0); ev.peak=Math.max(ev.peak,above);
     if(active) ev.quiet=0; else ev.quiet++;
     const len=(now-ev.t)/1000;
     if(ev.quiet>=20 || len>=60) endEvent(now-ev.quiet*FRAME_MS);
@@ -471,7 +535,8 @@ function tick(){
 
 function beginEvent(t,fr,above){
   A.pending=0;
-  A.ev={t,dbs:[fr.db],low:[fr.low],voice:[fr.voice],peak:above,quiet:0,clip:null};
+  const v=voicing(A.td,A.ctx.sampleRate);
+  A.ev={t,dbs:[fr.db],low:[fr.low],voice:[fr.voice],vr:[v.r],f0:[v.f0],peak:above,quiet:0,clip:null};
   if(CFG.clips && A.mime!==null && S.clipCount<CFG.maxClips){
     if(A.rec){clearTimeout(A.rec.stopT); A.ev.clip=A.rec.id; A.rec.events++;}
     else{
@@ -491,6 +556,11 @@ async function saveClip(rec){
   const blob=new Blob(rec.chunks,{type:rec.r.mimeType||A?.mime||"audio/webm"});
   if(!blob.size||!S) return;
   const type=rec.types.includes("parole")?"parole":rec.types.includes("ronflement")?"ronflement":(rec.types[0]||"bruit");
+  if(CFG.keep==="parole"&&rec.types.length&&type!=="parole"){
+    // pas de voix dans cet extrait : on ne garde pas l'audio (l'événement reste compté)
+    for(const e of S.events) if(e.clip===rec.id) delete e.clip;
+    S.clipCount=Math.max(0,S.clipCount-1); return;
+  }
   await put("clips",{id:rec.id,nightId:S.id,t:rec.t,dur:Math.round((Date.now()-rec.t)/1000),type,blob,mime:blob.type}).catch(()=>{});
 }
 function endEvent(tEnd){
@@ -755,6 +825,8 @@ async function openNight(id){
       </div>
       <div class="row">
         <button type="button" class="btn sm" data-act="selall">Tout sélectionner</button>
+        <button type="button" class="btn sm" data-act="reanalyze">Réanalyser la parole</button>
+        ${sorted.some(c=>c.type!=="parole"&&!c.fav)?`<button type="button" class="btn sm danger" data-act="keepspeech">Ne garder que la parole (${sorted.filter(c=>c.type!=="parole"&&!c.fav).length} à supprimer)</button>`:""}
         ${sorted.length>1?`<button type="button" class="btn sm danger" data-act="all">Supprimer tous les extraits</button>`:""}
       </div>`
     :`<p class="muted small">Aucun extrait pour cette nuit.</p>`}
@@ -827,6 +899,11 @@ async function openNight(id){
       const fv=f.dataset.filter;panel.querySelectorAll(".clip").forEach(c=>c.hidden=fv==="fav"?c.dataset.fav!=="1":fv!=="all"&&c.dataset.type!==fv);if(queue.length)plStop("Lecture arrêtée.");plButtons();applySpeed();return}
     const b=e.target.closest("[data-act]"); if(!b)return;
     const act=b.dataset.act; let ids=[];
+    if(act==="reanalyze"){b.disabled=true;const r=await reanalyzeClips(sorted,n,(i,t)=>{b.textContent="Analyse "+i+"/"+t+"…"});
+      toast(r.changed?r.changed+" extrait(s) reconnu(s) comme de la parole":"Aucune parole supplémentaire trouvée");await reopen();return}
+    if(act==="keepspeech"){ids=sorted.filter(c=>c.type!=="parole"&&!c.fav).map(c=>c.id);if(!ids.length)return;
+      if(!armBtn(b,"Toucher encore : supprimer les "+ids.length+" extraits sans parole"))return;
+      await removeClips(n,ids);toast(ids.length+" extrait(s) sans parole supprimé(s)");await reopen();return}
     if(act==="selall"){panel.querySelectorAll(".clip:not([hidden]) [data-sel]").forEach(cb=>setSel(cb,true));updateBar();return}
     if(act==="clear"){panel.querySelectorAll("[data-sel]").forEach(cb=>setSel(cb,false));updateBar();return}
     if(act==="fav"){const c=clipMap[b.closest(".clip").dataset.id];c.fav=!c.fav;await put("clips",c).catch(()=>{});toast(c.fav?"Ajouté aux favoris : protégé contre la suppression":"Retiré des favoris");await reopen();return}
@@ -853,9 +930,23 @@ function armBtn(btn,label){
   return false;
 }
 /* Change le type d'un extrait et des événements qu'il contient */
+/* Réécoute des extraits d'une nuit ; un extrait où de la voix est trouvée passe en « Parole ».
+   Les extraits reclassés à la main ne sont pas modifiés. */
+async function reanalyzeClips(clips,n,progress){
+  let changed=0,i=0;
+  for(const c of clips){progress&&progress(++i,clips.length);
+    if(c.manual||c.type==="parole"||!c.blob)continue;
+    let f; try{f=await analyzeClipBlob(c.blob)}catch(e){continue}
+    c.speechCheck={v:+f.voicedFrac.toFixed(2),at:Date.now()};
+    if(f.speech){c.type="parole";changed++;for(const e of n.events||[]) if(e.clip===c.id) e.type="parole"}
+    await put("clips",c).catch(()=>{});
+  }
+  if(changed)await put("nights",n).catch(()=>{});
+  return {changed};
+}
 async function retypeClip(n,c,type){
   if(!c||!TYPES[type])return;
-  c.type=type; await put("clips",c).catch(()=>{});
+  c.type=type; c.manual=true; await put("clips",c).catch(()=>{});
   for(const e of n.events||[]) if(e.clip===c.id) e.type=type;
   await put("nights",n).catch(()=>{});
 }
@@ -1183,7 +1274,7 @@ function weeksOfMonth(p,idx,allN,lastK){
 
 /* Réglages */
 async function renderSettings(){
-  $("#sens").value=CFG.sens; $("#sensVal").textContent=CFG.sens; $("#optClips").checked=CFG.clips; $("#maxClips").value=CFG.maxClips;
+  $("#sens").value=CFG.sens; $("#sensVal").textContent=CFG.sens; $("#optClips").checked=CFG.clips; $("#maxClips").value=CFG.maxClips; $("#optKeep").value=CFG.keep||"parole";
   $("#optMotion").checked=CFG.motion; $("#target").value=CFG.target; $("#targetBed").value=CFG.targetBed;
   try{const e=await navigator.storage.estimate();$("#storageInfo").textContent="Espace utilisé : "+(e.usage/1048576).toFixed(1)+" Mo"}catch(e){}
   Sync.render();
@@ -1210,6 +1301,19 @@ $("#exportBtn").onclick=async()=>{const data={app:"nocturne",exportedAt:new Date
 $("#importFile").onchange=async e=>{const f=e.target.files[0];if(!f)return;
   try{const d=JSON.parse(await f.text());if(d.app!=="nocturne")throw 0;for(const n of d.nights)await put("nights",n);toast(d.nights.length+" nuits importées")}catch(err){toast("Fichier non reconnu : choisis un export Nocturne (.json).")}
   e.target.value=""};
+$("#optKeep").onchange=e=>{CFG.keep=e.target.value;saveCfg();toast(CFG.keep==="parole"?"Seuls les extraits avec de la parole seront gardés":"Tous les extraits seront gardés")};
+$("#reanalyzeAll").onclick=async e=>{const b=e.target;b.disabled=true;let changed=0;
+  try{const ns=await all("nights");let k=0;for(const n of ns){k++;const cl=await clipsOf(n.id);if(!cl.length)continue;
+      const r=await reanalyzeClips(cl,n,(i,t)=>{b.textContent="Nuit "+k+"/"+ns.length+" · extrait "+i+"/"+t});changed+=r.changed}}
+  finally{b.disabled=false;b.textContent="Réanalyser tous les extraits"}
+  $("#reanalyzeInfo").textContent=changed?changed+" extrait(s) reconnu(s) comme de la parole. Tu peux maintenant ne garder que la parole.":"Réanalyse terminée : aucune parole supplémentaire trouvée."};
+$("#keepSpeechAll").onclick=async e=>{const b=e.target;const cl=(await all("clips")).filter(c=>c.type!=="parole"&&!c.fav);
+  if(!cl.length){toast("Tous tes extraits sont déjà de la parole (ou des favoris)");return}
+  if(!b.dataset.armed){b.dataset.armed=1;b.textContent="Toucher encore : supprimer "+cl.length+" extrait(s)";setTimeout(()=>{delete b.dataset.armed;b.textContent="Ne garder que la parole (toutes les nuits)"},5000);return}
+  delete b.dataset.armed;b.textContent="Ne garder que la parole (toutes les nuits)";
+  const byNight={};for(const c of cl)(byNight[c.nightId]=byNight[c.nightId]||[]).push(c.id);
+  for(const [nid,ids] of Object.entries(byNight)){const n=await get("nights",nid);if(n)await removeClips(n,ids);else for(const id of ids)await del("clips",id)}
+  toast(cl.length+" extrait(s) sans parole supprimé(s)");renderSettings()};
 const wipe=$("#wipeClips"); wipe.onclick=async()=>{if(!wipe.dataset.armed){wipe.dataset.armed=1;wipe.textContent="Toucher encore pour confirmer";return}
   for(const c of await all("clips"))if(!c.fav)await del("clips",c.id);delete wipe.dataset.armed;wipe.textContent="Supprimer tous les extraits audio (sauf favoris)";toast("Extraits supprimés");renderSettings()};
 
