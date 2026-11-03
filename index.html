@@ -171,6 +171,7 @@ nav button[aria-current=page]{color:var(--moon)}
       <div class="hero-title"><p class="label">Ce soir</p><h1 id="greet">Prêt pour la nuit</h1></div>
     </div>
     <div class="small" id="cloudLine" hidden></div>
+    <p class="small muted" id="verifyLine" hidden></p>
     <p class="muted" id="lastNight">Aucune nuit enregistrée pour l'instant.</p>
     <button class="btn primary" id="startBtn" style="padding:14px;font-size:1.05rem">Commencer la nuit</button>
     <p class="warn" id="supportWarn" hidden></p>
@@ -221,8 +222,8 @@ nav button[aria-current=page]{color:var(--moon)}
       <input type="range" id="sens" min="6" max="24" step="1"><span class="muted small">Plus bas = plus sensible. Monte la valeur si un ventilateur ou la rue déclenche trop d'événements.</span></div>
     <label class="row"><input type="checkbox" id="optClips"> Enregistrer des extraits audio des événements</label>
     <div class="field"><label for="optKeep">Extraits à garder</label>
-      <select id="optKeep"><option value="parole">Seulement quand je parle, même des mots inintelligibles</option><option value="tout">Tous les sons détectés (ronflements, bruits…)</option></select>
-      <span class="muted small">Les ronflements et les bruits restent comptés dans les statistiques ; seul leur audio n'est pas gardé.</span></div>
+      <select id="optKeep"><option value="parole">Seulement la parole confirmée (mots ou marmonnement)</option><option value="tout">Tous les sons détectés (ronflements, bruits…)</option></select>
+      <span class="muted small">Chaque son de la nuit est réécouté par un détecteur de voix humaine ; sans voix, l'audio est effacé aussitôt. Les ronflements et les bruits restent comptés dans les statistiques.</span></div>
     <div class="field"><label for="maxClips">Extraits maximum par nuit</label><input type="number" id="maxClips" min="5" max="300" step="5"></div>
     <label class="row"><input type="checkbox" id="optMotion"> Utiliser l'accéléromètre (téléphone posé sur le matelas)</label>
   </div>
@@ -246,8 +247,8 @@ nav button[aria-current=page]{color:var(--moon)}
       <button class="btn" id="exportBtn">Exporter (JSON)</button>
       <label class="btn" for="importFile">Importer</label><input type="file" id="importFile" accept="application/json" hidden>
     </div>
-    <div class="row"><button class="btn" id="reanalyzeAll">Réanalyser tous les extraits</button><button class="btn danger" id="keepSpeechAll">Ne garder que la parole (toutes les nuits)</button></div>
-    <p class="small muted" id="reanalyzeInfo">La réanalyse réécoute chaque extrait pour repérer la parole, y compris les marmonnements et les mots inintelligibles. Les favoris ne sont jamais supprimés.</p>
+    <div class="row"><button class="btn" id="reanalyzeAll">Vérifier tous les extraits</button><button class="btn danger" id="keepSpeechAll">Ne garder que la parole (toutes les nuits)</button></div>
+    <p class="small muted" id="reanalyzeInfo">La vérification réécoute chaque extrait avec un modèle de détection de voix humaine (Silero VAD), directement sur le téléphone. Seuls les extraits où tu dis des mots ou marmonnes sont confirmés. Les favoris ne sont jamais supprimés.</p>
     <div class="row"><button class="btn danger" id="wipeClips">Supprimer tous les extraits audio (sauf favoris)</button></div>
   </div>
   <p class="muted small">Nocturne mesure des sons et des mouvements et en déduit des estimations. Ce n'est pas un dispositif médical : en cas de fatigue persistante, de ronflements forts et quotidiens ou de pauses respiratoires remarquées par quelqu'un, parles-en à un médecin.</p>
@@ -283,6 +284,7 @@ nav button[aria-current=page]{color:var(--moon)}
 <div id="sheet" hidden><div class="body" id="sheetBody"></div></div>
 
 <script src="firebase-config.js"></script>
+<script src="vad.js"></script>
 <script>
 "use strict";
 /* ===================== Stockage (IndexedDB) ===================== */
@@ -464,26 +466,6 @@ function speechFeatures(dbs,rs,f0s,dur){
   const speech=!pureTone&&dur>=0.5&&voicedFrac>=0.3&&medF0>=75&&medF0<=400&&(pps>=0.9||f0Rel>=0.07);
   return {voicedFrac,medF0,f0Rel,pps,medR,pureTone,speech};
 }
-/* Réécoute d'un extrait déjà enregistré pour y chercher de la parole */
-async function analyzeClipBlob(blob){
-  const AC=window.AudioContext||window.webkitAudioContext; const ac=new AC();
-  try{
-    const buf=await ac.decodeAudioData(await blob.arrayBuffer()); const sr=buf.sampleRate, x=buf.getChannelData(0);
-    const W=2048, hop=Math.round(sr*FRAME_MS/1000), dbs=[], rs=[], f0s=[];
-    for(let s=0;s+W<=x.length;s+=hop){const fr=x.subarray(s,s+W);let e=0;for(let i=0;i<W;i++)e+=fr[i]*fr[i];
-      dbs.push(20*Math.log10(Math.sqrt(e/W)+1e-9)); const v=voicing(fr,sr); rs.push(v.r); f0s.push(v.f0)}
-    if(dbs.length<6)return {speech:false,voicedFrac:0};
-    // plusieurs phrases peuvent se suivre dans un extrait : on cherche le meilleur passage de 3 s
-    const win=Math.round(3000/FRAME_MS); let best={speech:false,voicedFrac:0};
-    for(let s=0;s<dbs.length;s+=Math.round(win/2)){
-      const e=Math.min(dbs.length,s+win); const f=speechFeatures(dbs.slice(s,e),rs.slice(s,e),f0s.slice(s,e),(e-s)*FRAME_MS/1000);
-      if(f.speech){best=f;break} if(f.voicedFrac>best.voicedFrac)best=f;
-      if(e===dbs.length)break;
-    }
-    return best;
-  }finally{ac.close().catch(()=>{})}
-}
-
 /* Classement d'un événement terminé (règles simples, assumées comme estimations) */
 function classify(ev,lastLowT){
   const dur=ev.dur, low=mean(ev.low), voice=mean(ev.voice);
@@ -556,12 +538,9 @@ async function saveClip(rec){
   const blob=new Blob(rec.chunks,{type:rec.r.mimeType||A?.mime||"audio/webm"});
   if(!blob.size||!S) return;
   const type=rec.types.includes("parole")?"parole":rec.types.includes("ronflement")?"ronflement":(rec.types[0]||"bruit");
-  if(CFG.keep==="parole"&&rec.types.length&&type!=="parole"){
-    // pas de voix dans cet extrait : on ne garde pas l'audio (l'événement reste compté)
-    for(const e of S.events) if(e.clip===rec.id) delete e.clip;
-    S.clipCount=Math.max(0,S.clipCount-1); return;
-  }
-  await put("clips",{id:rec.id,nightId:S.id,t:rec.t,dur:Math.round((Date.now()-rec.t)/1000),type,blob,mime:blob.type}).catch(()=>{});
+  // candidat : le second contrôle (modèle de voix) décide ensuite s'il est gardé
+  await put("clips",{id:rec.id,nightId:S.id,t:rec.t,dur:Math.round((Date.now()-rec.t)/1000),type,blob,mime:blob.type,pending:true}).catch(()=>{});
+  Verify.add(rec.id);
 }
 function endEvent(tEnd){
   const ev=A.ev; A.ev=null; ev.dur=Math.max(0.2,(tEnd-ev.t)/1000);
@@ -825,8 +804,8 @@ async function openNight(id){
       </div>
       <div class="row">
         <button type="button" class="btn sm" data-act="selall">Tout sélectionner</button>
-        <button type="button" class="btn sm" data-act="reanalyze">Réanalyser la parole</button>
-        ${sorted.some(c=>c.type!=="parole"&&!c.fav)?`<button type="button" class="btn sm danger" data-act="keepspeech">Ne garder que la parole (${sorted.filter(c=>c.type!=="parole"&&!c.fav).length} à supprimer)</button>`:""}
+        <button type="button" class="btn sm" data-act="reanalyze">Vérifier la parole</button>
+        ${sorted.some(c=>(c.type!=="parole"||c.verified===undefined)&&!c.fav)?`<button type="button" class="btn sm danger" data-act="keepspeech">Ne garder que la parole confirmée</button>`:""}
         ${sorted.length>1?`<button type="button" class="btn sm danger" data-act="all">Supprimer tous les extraits</button>`:""}
       </div>`
     :`<p class="muted small">Aucun extrait pour cette nuit.</p>`}
@@ -899,9 +878,12 @@ async function openNight(id){
       const fv=f.dataset.filter;panel.querySelectorAll(".clip").forEach(c=>c.hidden=fv==="fav"?c.dataset.fav!=="1":fv!=="all"&&c.dataset.type!==fv);if(queue.length)plStop("Lecture arrêtée.");plButtons();applySpeed();return}
     const b=e.target.closest("[data-act]"); if(!b)return;
     const act=b.dataset.act; let ids=[];
-    if(act==="reanalyze"){b.disabled=true;const r=await reanalyzeClips(sorted,n,(i,t)=>{b.textContent="Analyse "+i+"/"+t+"…"});
-      toast(r.changed?r.changed+" extrait(s) reconnu(s) comme de la parole":"Aucune parole supplémentaire trouvée");await reopen();return}
-    if(act==="keepspeech"){ids=sorted.filter(c=>c.type!=="parole"&&!c.fav).map(c=>c.id);if(!ids.length)return;
+    if(act==="reanalyze"){b.disabled=true;const r=await reanalyzeClips(sorted,n,(i,t)=>{b.textContent="Vérification "+i+"/"+t+"…"});
+      toast(r.speech?r.speech+" extrait(s) avec parole confirmée":"Aucune parole confirmée dans cette nuit");await reopen();return}
+    if(act==="keepspeech"){
+      const todo=sorted.filter(c=>c.verified===undefined&&!c.manual);
+      if(todo.length&&!b.classList.contains("armed")){b.disabled=true;await reanalyzeClips(todo,n,(i,t)=>{b.textContent="Vérification "+i+"/"+t+"…"});await reopen();toast("Vérification terminée : touche à nouveau pour supprimer");return}
+      ids=sorted.filter(c=>c.type!=="parole"&&!c.fav).map(c=>c.id);if(!ids.length){toast("Il ne reste que de la parole");return}
       if(!armBtn(b,"Toucher encore : supprimer les "+ids.length+" extraits sans parole"))return;
       await removeClips(n,ids);toast(ids.length+" extrait(s) sans parole supprimé(s)");await reopen();return}
     if(act==="selall"){panel.querySelectorAll(".clip:not([hidden]) [data-sel]").forEach(cb=>setSel(cb,true));updateBar();return}
@@ -930,19 +912,73 @@ function armBtn(btn,label){
   return false;
 }
 /* Change le type d'un extrait et des événements qu'il contient */
-/* Réécoute des extraits d'une nuit ; un extrait où de la voix est trouvée passe en « Parole ».
-   Les extraits reclassés à la main ne sont pas modifiés. */
+/* ===== Second contrôle : y a-t-il vraiment des mots ou un marmonnement ? =====
+   Modèle de détection de voix Silero VAD (vad.js), qui tourne sur le téléphone, hors ligne.
+   Un extrait est « parole confirmée » s'il contient au moins 0,3 s de voix (probabilité > 0,5)
+   avec un pic à 0,6 ou plus. Ronflements, souffle, draps, ventilateur, bips n'y arrivent pas. */
+const SPEECH_MIN_SEC=0.3, SPEECH_MIN_PEAK=0.6;
+async function decode16k(blob){
+  const OAC=window.OfflineAudioContext||window.webkitOfflineAudioContext;
+  const oc=new OAC(1,16000,16000);                     // décodage directement rééchantillonné à 16 kHz
+  const b=await oc.decodeAudioData(await blob.arrayBuffer());
+  if(b.numberOfChannels===1)return b.getChannelData(0);
+  const x=new Float32Array(b.length);for(let c=0;c<b.numberOfChannels;c++){const d=b.getChannelData(c);for(let i=0;i<x.length;i++)x[i]+=d[i]/b.numberOfChannels}
+  return x;
+}
+async function checkSpeech(blob){
+  await NocturneVAD.load("silero_vad_16k.safetensors");
+  const x=await decode16k(blob);
+  // on rend la main au téléphone entre deux secondes d'audio, pour ne pas figer l'écran
+  const st=NocturneVAD.newState(), p=[];
+  for(let i=0;i<x.length;i+=8000){p.push(...NocturneVAD.probs(x.subarray(i,Math.min(x.length,i+8000)),st));await new Promise(r=>setTimeout(r,0))}
+  const s=NocturneVAD.summarize(p);
+  return {...s,speech:s.speechSec>=SPEECH_MIN_SEC&&s.maxProb>=SPEECH_MIN_PEAK};
+}
+/* Applique le verdict à un extrait et aux événements de sa nuit */
+function applyVerdict(n,c,r){
+  c.vad={s:r.speechSec,p:r.maxProb,at:Date.now()}; c.verified=r.speech; delete c.pending;
+  if(c.manual)return;
+  const evs=(n.events||[]).filter(e=>e.clip===c.id);
+  if(r.speech){c.type="parole"; if(!evs.some(e=>e.type==="parole")&&evs.length)evs.reduce((a,b)=>b.dur>a.dur?b:a).type="parole"}
+  else{if(c.type==="parole")c.type=evs.find(e=>e.type==="ronflement")?"ronflement":"bruit"; for(const e of evs) if(e.type==="parole")e.type="bruit"}
+}
+/* File d'attente : vérifie les nouveaux extraits un par un, même pendant l'enregistrement */
+const Verify={q:[],busy:false,done:0,
+  add(id){if(!this.q.includes(id))this.q.push(id);this.run()},
+  async run(){
+    if(this.busy)return;this.busy=true;
+    try{while(this.q.length){const id=this.q[0];this.status();
+      const c=await get("clips",id).catch(()=>null);
+      if(c&&c.blob&&c.pending){
+        let r=null;try{r=await checkSpeech(c.blob)}catch(e){r=null}
+        if(r){
+          const live=S&&S.id===c.nightId, n=live?S:await get("nights",c.nightId);
+          if(n){applyVerdict(n,c,r);
+            if(!r.speech&&CFG.keep==="parole"&&!c.fav){       // pas de voix : l'audio n'est pas gardé
+              await del("clips",c.id);for(const e of n.events||[]) if(e.clip===c.id) delete e.clip;
+              if(live)S.clipCount=Math.max(0,S.clipCount-1);
+            }else await put("clips",c).catch(()=>{});
+            if(!live)await put("nights",n).catch(()=>{});
+          }
+        }
+      }
+      this.q.shift();this.done++;}
+    }finally{this.busy=false;this.status();if(!S&&!$("#view-journal").hidden)renderJournal()}
+  },
+  status(){const el=$("#verifyLine");if(!el)return;const k=this.q.length;el.hidden=!k||!!S;el.textContent=k?"🔎 Vérification de la parole : "+k+" extrait(s) restant(s)…":""},
+  async resume(){for(const c of await all("clips").catch(()=>[]))if(c.pending)this.add(c.id)}
+};
+/* Réécoute des extraits d'une nuit avec le second contrôle (les extraits reclassés à la main ne bougent pas) */
 async function reanalyzeClips(clips,n,progress){
-  let changed=0,i=0;
+  let changed=0,i=0,speech=0;
   for(const c of clips){progress&&progress(++i,clips.length);
-    if(c.manual||c.type==="parole"||!c.blob)continue;
-    let f; try{f=await analyzeClipBlob(c.blob)}catch(e){continue}
-    c.speechCheck={v:+f.voicedFrac.toFixed(2),at:Date.now()};
-    if(f.speech){c.type="parole";changed++;for(const e of n.events||[]) if(e.clip===c.id) e.type="parole"}
+    if(c.manual||!c.blob)continue;
+    let r; try{r=await checkSpeech(c.blob)}catch(e){continue}
+    const before=c.type; applyVerdict(n,c,r); if(r.speech)speech++; if(c.type!==before)changed++;
     await put("clips",c).catch(()=>{});
   }
-  if(changed)await put("nights",n).catch(()=>{});
-  return {changed};
+  await put("nights",n).catch(()=>{});
+  return {changed,speech};
 }
 async function retypeClip(n,c,type){
   if(!c||!TYPES[type])return;
@@ -974,7 +1010,7 @@ function clipDur(c,n){
 }
 function clipRow(c,i,n){const T=TYPES[c.type]||TYPES.bruit, d=clipDur(c,n);
   return `<div class="clip${c.fav?" fav":""}" data-id="${c.id}" data-type="${esc(c.type)}" data-fav="${c.fav?1:0}">
-    <div class="row between small"><span class="row" style="gap:8px"><span class="dot ${T.cls}"></span><select class="typesel" data-retype="${c.id}" id="type-${c.id}" aria-label="Type de l'extrait">${Object.keys(TYPES).map(k=>`<option value="${k}"${k===c.type?" selected":""}>${TYPES[k].l}</option>`).join("")}</select><span class="num muted">${hm(c.t)}${d?` · ≈ ${d} s`:""}</span></span><button type="button" class="favbtn" data-act="fav" aria-pressed="${!!c.fav}" aria-label="${c.fav?"Retirer des favoris":"Ajouter aux favoris"}" title="${c.fav?"Retirer des favoris":"Ajouter aux favoris"}">${c.fav?"★":"☆"}</button></div>
+    <div class="row between small"><span class="row" style="gap:8px"><span class="dot ${T.cls}"></span><select class="typesel" data-retype="${c.id}" id="type-${c.id}" aria-label="Type de l'extrait">${Object.keys(TYPES).map(k=>`<option value="${k}"${k===c.type?" selected":""}>${TYPES[k].l}</option>`).join("")}</select><span class="num muted">${hm(c.t)}${d?` · ≈ ${d} s`:""}</span>${c.verified===true?`<span class="small" style="color:var(--good)" title="Voix détectée : ${c.vad?c.vad.s:""} s">✓ voix</span>`:c.pending?`<span class="small muted">🔎</span>`:""}</span><button type="button" class="favbtn" data-act="fav" aria-pressed="${!!c.fav}" aria-label="${c.fav?"Retirer des favoris":"Ajouter aux favoris"}" title="${c.fav?"Retirer des favoris":"Ajouter aux favoris"}">${c.fav?"★":"☆"}</button></div>
     <audio controls preload="none" data-clip="${c.id}"></audio>
     <div class="row between"><label class="selbox"><input type="checkbox" data-sel="${c.id}" id="sel-${c.id}"> Sélectionner</label>${c.fav?`<span class="small" style="color:var(--moon)">★ Favori protégé</span>`:`<button type="button" class="btn sm" data-act="del">Supprimer</button>`}</div>
   </div>`}
@@ -1302,12 +1338,14 @@ $("#importFile").onchange=async e=>{const f=e.target.files[0];if(!f)return;
   try{const d=JSON.parse(await f.text());if(d.app!=="nocturne")throw 0;for(const n of d.nights)await put("nights",n);toast(d.nights.length+" nuits importées")}catch(err){toast("Fichier non reconnu : choisis un export Nocturne (.json).")}
   e.target.value=""};
 $("#optKeep").onchange=e=>{CFG.keep=e.target.value;saveCfg();toast(CFG.keep==="parole"?"Seuls les extraits avec de la parole seront gardés":"Tous les extraits seront gardés")};
-$("#reanalyzeAll").onclick=async e=>{const b=e.target;b.disabled=true;let changed=0;
-  try{const ns=await all("nights");let k=0;for(const n of ns){k++;const cl=await clipsOf(n.id);if(!cl.length)continue;
-      const r=await reanalyzeClips(cl,n,(i,t)=>{b.textContent="Nuit "+k+"/"+ns.length+" · extrait "+i+"/"+t});changed+=r.changed}}
-  finally{b.disabled=false;b.textContent="Réanalyser tous les extraits"}
-  $("#reanalyzeInfo").textContent=changed?changed+" extrait(s) reconnu(s) comme de la parole. Tu peux maintenant ne garder que la parole.":"Réanalyse terminée : aucune parole supplémentaire trouvée."};
-$("#keepSpeechAll").onclick=async e=>{const b=e.target;const cl=(await all("clips")).filter(c=>c.type!=="parole"&&!c.fav);
+$("#reanalyzeAll").onclick=async e=>{const b=e.target;b.disabled=true;let speech=0,total=0;
+  try{const ns=await all("nights");let k=0;for(const n of ns){k++;const cl=await clipsOf(n.id);if(!cl.length)continue;total+=cl.length;
+      const r=await reanalyzeClips(cl,n,(i,t)=>{b.textContent="Nuit "+k+"/"+ns.length+" · extrait "+i+"/"+t});speech+=r.speech}}
+  finally{b.disabled=false;b.textContent="Vérifier tous les extraits"}
+  $("#reanalyzeInfo").textContent="Vérification terminée : parole confirmée dans "+speech+" extrait(s) sur "+total+". Tu peux maintenant ne garder que ceux-là.";renderSettings()};
+$("#keepSpeechAll").onclick=async e=>{const b=e.target;
+  if((await all("clips")).some(c=>c.verified===undefined&&!c.manual)){toast("Touche d'abord « Vérifier tous les extraits »");return}
+  const cl=(await all("clips")).filter(c=>c.type!=="parole"&&!c.fav);
   if(!cl.length){toast("Tous tes extraits sont déjà de la parole (ou des favoris)");return}
   if(!b.dataset.armed){b.dataset.armed=1;b.textContent="Toucher encore : supprimer "+cl.length+" extrait(s)";setTimeout(()=>{delete b.dataset.armed;b.textContent="Ne garder que la parole (toutes les nuits)"},5000);return}
   delete b.dataset.armed;b.textContent="Ne garder que la parole (toutes les nuits)";
@@ -1574,6 +1612,7 @@ async function recover(){
   try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
   await loadCfg(); await recover(); await refreshHome();
   await Sync.init();
+  Verify.resume();
 })();
 </script>
 <script>

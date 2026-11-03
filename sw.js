@@ -2,8 +2,8 @@
 // La page est redemandée au réseau d'abord (pour avoir la dernière version) ;
 // sans réponse rapide ou sans connexion, la copie locale prend le relais.
 // Les données Firebase ne passent pas par ici.
-const CACHE = 'nocturne-v9';
-const CORE = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './firebase-config.js', './night.jpg', './sunset.jpg', './standing.jpg', './apple-touch-icon.png'];
+const CACHE = 'nocturne-v10';
+const CORE = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './firebase-config.js', './night.jpg', './sunset.jpg', './standing.jpg', './apple-touch-icon.png', './vad.js', './silero_vad_16k.safetensors'];
 const EXTERNAL = ['fonts.googleapis.com', 'fonts.gstatic.com'];
 const PAGE = new URL('./index.html', self.registration.scope).href;
 const NET_TIMEOUT = 4000;   // réseau trop lent (réception faible la nuit) : on sert la copie locale
