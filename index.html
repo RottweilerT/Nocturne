@@ -163,6 +163,15 @@ nav button[aria-current=page]{color:var(--moon)}
 @keyframes tp-in{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.tp-menu:not([hidden]),.tp-in{animation:none}.tp-out{transition:none}}
 .tp-menu{--tp-bg:var(--panel);--tp-ink:var(--fg);--tp-line:var(--line);--tp-muted:var(--muted);--tp-hover:var(--panel2);--tp-soft:var(--panel2);--tp-accent:var(--moon);--tp-font:var(--body)}
+/* ===== Ergonomie : focus clavier visible, zones tactiles confortables, messages lisibles ===== */
+:where(button,a[href],input,select,textarea,summary,[role=tab],[tabindex]):focus-visible{outline:2px solid var(--ux-focus);outline-offset:2px}
+.ux-draft{margin:6px 0 0;font-size:.8rem;color:var(--ux-muted)}
+@media (pointer:coarse){html{-webkit-tap-highlight-color:transparent}}
+:root{--ux-focus:var(--moon);--ux-muted:var(--muted)}
+/* case à cocher sur la même ligne que son texte */
+label.row:has(> input[type=checkbox]){flex-wrap:nowrap;align-items:flex-start}
+label.row:has(> input[type=checkbox]) input{margin-top:3px;flex:none}
+@media (pointer:coarse){.btn.sm,button.sm{min-height:40px}}
 </style>
 </head>
 <body>
@@ -361,7 +370,7 @@ const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&
 const mean=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;
 const sd=a=>{if(a.length<2)return 0;const m=mean(a);return Math.sqrt(mean(a.map(x=>(x-m)**2)))};
 function pct(arr,p){if(!arr.length)return -90;const s=arr.slice().sort((a,b)=>a-b);return s[Math.min(s.length-1,Math.floor(p*s.length))]}
-function toast(msg){const t=document.createElement("div");t.className="toast";t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),2600)}
+function toast(msg){const t=document.createElement("div");t.className="toast";t.setAttribute("role","status");t.setAttribute("aria-live","polite");t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),2600)}
 /* minutes après midi, pour comparer des heures de coucher autour de minuit */
 function bedMinutes(t){const d=new Date(t);let m=d.getHours()*60+d.getMinutes();if(m<12*60)m+=24*60;return m}
 const TYPES={ronflement:{c:"var(--snore)",cls:"d-snore",l:"Ronflement"},parole:{c:"var(--talk)",cls:"d-talk",l:"Parole"},bruit:{c:"var(--noise)",cls:"d-noise",l:"Bruit"}};
@@ -1773,6 +1782,58 @@ function TabsPerso(o){
   return {hide,show,refresh:render,hidden:()=>hidden.slice()};
 }
 TabsPerso({container:document.querySelector('nav .in'),grid:document.querySelector('nav .in'),up:true,buttons:[...document.querySelectorAll('nav .in button[data-view]')],key:b=>b.dataset.view,activeAttr:'aria-current',activeVal:'page',activeOff:'false',moreHTML:'<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>Plus',profile:()=>Sync.user&&Sync.user.uid,storage:'nocturne-onglets-masques',toast});
+</script>
+<script>
+const UX_CONF={nav:'nav',tabs:'nav .in button[data-view]',key:'view',attr:'aria-current',val:'page',prefix:'nocturne'};
+/* ===== Ergonomie (couche de navigation uniquement : aucune donnée ni logique métier modifiée) =====
+   1. Bouton « retour » du téléphone / navigateur : revient à l'onglet précédent au lieu de quitter l'appli.
+   2. Chaque onglet retrouve la position de défilement où on l'avait laissé.
+   3. Un ticket en cours d'écriture est gardé sur l'appareil jusqu'à son envoi (fermeture, rechargement…). */
+(function(c){
+  const btns=()=>[...document.querySelectorAll(c.tabs)];
+  const keyOf=b=>b.getAttribute('data-'+c.key);
+  const active=()=>{const b=btns().find(x=>x.getAttribute(c.attr)===c.val);return b?keyOf(b):null};
+  const scroller=t=>(c.scroller&&c.scroller(t))||null;
+  const getY=t=>{const s=scroller(t);return s?s.scrollTop:window.scrollY};
+  const setY=(t,y)=>{const s=scroller(t);if(s)s.scrollTop=y;else window.scrollTo(0,y)};
+  /* l'appli peut réécrire l'entrée d'historique (adresse #onglet) : on garde l'onglet mémorisé */
+  const rs=history.replaceState.bind(history);
+  history.replaceState=(s,t,u)=>rs(s==null&&history.state&&history.state.uxTab?{uxTab:history.state.uxTab}:s,t,u);
+  let cur=active(),restoring=false;const pos={};
+  if(cur)rs(Object.assign({},history.state||{},{uxTab:cur}),'');
+  /* on retient la position de défilement de l'onglet en cours avant chaque changement */
+  document.addEventListener('pointerdown',e=>{if(cur&&e.target.closest&&e.target.closest(c.tabs+',.tp-menu,.tp-more,.moremenu,.tabmore'))pos[cur]=getY(cur)},true);
+  addEventListener('keydown',e=>{if(cur&&(e.key==='Enter'||e.key===' '))pos[cur]=getY(cur)},true);
+  function changed(){
+    const t=active();if(!t||t===cur)return;
+    if(pos[cur]==null)pos[cur]=0;
+    if(!restoring)history.pushState({uxTab:t},'',location.href);
+    restoring=false;cur=t;
+    const y=pos[t]||0;requestAnimationFrame(()=>requestAnimationFrame(()=>setY(t,y)));
+  }
+  new MutationObserver(changed).observe(document.querySelector(c.nav),{subtree:true,attributes:true,attributeFilter:[c.attr]});
+  addEventListener('popstate',e=>{
+    const t=e.state&&e.state.uxTab;if(!t||t===active())return;
+    const b=btns().find(x=>keyOf(x)===t);if(!b||b.disabled)return;
+    if(cur)pos[cur]=getY(cur);restoring=true;b.click();
+    setTimeout(()=>{if(active()!==t)restoring=false},300);
+  });
+  /* brouillon du ticket en cours d'écriture */
+  if(c.draft){
+    const d=c.draft,K=c.prefix+'-brouillon-ticket',f=document.querySelector(d.form),body=document.querySelector(d.body),subj=document.querySelector(d.subject),sub=document.querySelector(d.submit);
+    if(f&&body){
+      const isNew=()=>!sub||/cr[ée]er/i.test(sub.textContent||'');
+      const read=()=>{try{return JSON.parse(localStorage.getItem(K)||'null')}catch(e){return null}};
+      const write=v=>{try{v?localStorage.setItem(K,JSON.stringify(v)):localStorage.removeItem(K)}catch(e){}};
+      const save=()=>{if(!isNew())return;const v={b:body.value,s:subj?subj.value:''};write(v.b.trim()||v.s?v:null)};
+      body.addEventListener('input',save);subj&&subj.addEventListener('change',save);
+      const dr=read();
+      if(dr&&!body.value&&isNew()){body.value=dr.b||'';if(subj&&dr.s&&[...subj.options].some(o=>o.value===dr.s))subj.value=dr.s;
+        if(dr.b){const n=document.createElement('p');n.className='ux-draft';n.textContent='Brouillon retrouvé : ton ticket non envoyé a été remis ici.';body.insertAdjacentElement('afterend',n);setTimeout(()=>n.remove(),8000)}}
+      f.addEventListener('submit',()=>setTimeout(()=>{if(!body.value.trim())write(null)},1200));
+    }
+  }
+})(UX_CONF);
 </script>
 <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});</script>
 </body>
