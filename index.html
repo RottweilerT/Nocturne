@@ -124,6 +124,9 @@ nav button[aria-current=page]{color:var(--moon)}
 .bin{border-top:1px solid var(--line);padding-top:10px}
 .bin summary{cursor:pointer;color:var(--muted);font-size:.9rem;padding:6px 0}
 .bin .clip{opacity:.85}
+.trash summary{cursor:pointer;list-style:none}
+.trashrow{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line)}
+.trashrow:last-child{border-bottom:0}
 .clip.selected{outline:2px solid var(--moon);outline-offset:-2px}
 .typesel{width:auto;padding:3px 6px;font-size:.88rem;font-weight:500;background:var(--panel)}
 .selbox{display:inline-flex;align-items:center;gap:8px;font-size:.9rem;cursor:pointer;padding:4px 0}
@@ -753,7 +756,35 @@ function show(view){
   if(view==="journal")renderJournal(); if(view==="tendances")renderTrends(); if(view==="reglages")renderSettings(); if(view==="nuit")refreshHome();
   window.scrollTo(0,0);
 }
-async function nights(){const a=await all("nights").catch(()=>[]);return a.filter(n=>n.end).sort((a,b)=>a.start-b.start)}
+async function nights(){const a=await all("nights").catch(()=>[]);return a.filter(n=>n.end&&!n.deleted).sort((a,b)=>a.start-b.start)}
+/* Corbeille : une nuit supprimée y reste 30 jours, avec ses extraits, avant d'être effacée */
+const TRASH_DAYS=30;
+async function trashedNights(){const a=await all("nights").catch(()=>[]);return a.filter(n=>n.deleted).sort((a,b)=>b.deleted-a.deleted)}
+async function purgeTrash(){
+  const now=Date.now();
+  for(const n of await trashedNights()) if(now-n.deleted>TRASH_DAYS*86400e3){
+    for(const c of await clipsOf(n.id).catch(()=>[])) await del("clips",c.id).catch(()=>{});
+    await del("nights",n.id).catch(()=>{});
+  }
+}
+function trashLeft(t){const d=Math.ceil((TRASH_DAYS*86400e3-(Date.now()-t))/86400e3);return d<=1?"effacée demain":"effacée dans "+d+" j"}
+async function renderTrash(box){
+  const tr=await trashedNights(); if(!tr.length)return;
+  const sec=document.createElement("details");sec.className="panel trash";
+  sec.innerHTML=`<summary><b>🗑 Corbeille</b> <span class="muted small">· ${tr.length} nuit${tr.length>1?"s":""}, gardée${tr.length>1?"s":""} ${TRASH_DAYS} jours</span></summary>
+    <div class="evlist" style="margin-top:10px">${tr.map(n=>`<div class="trashrow" data-id="${esc(n.id)}">
+      <div style="min-width:0"><div style="text-transform:capitalize;font-weight:500">${esc(dayLabel(n.start))}</div>
+      <div class="muted small num">${hm(n.start)} → ${hm(n.end)} · ${hmm(sleepWindow(n).dur)} · ${trashLeft(n.deleted)}</div></div>
+      <div class="row" style="gap:6px"><button type="button" class="btn sm" data-trash="restore">Restaurer</button><button type="button" class="btn sm danger" data-trash="purge">Effacer</button></div></div>`).join("")}</div>`;
+  sec.addEventListener("click",async e=>{
+    const b=e.target.closest("[data-trash]");if(!b)return;const id=b.closest(".trashrow").dataset.id;const n=await get("nights",id);if(!n)return;
+    if(b.dataset.trash==="restore"){delete n.deleted;await put("nights",n);toast("Nuit restaurée");renderJournal();return}
+    if(!b.dataset.armed){b.dataset.armed=1;b.textContent="Effacer définitivement ?";setTimeout(()=>{if(b.isConnected){delete b.dataset.armed;b.textContent="Effacer"}},5000);return}
+    for(const c of await clipsOf(id).catch(()=>[])) await del("clips",c.id).catch(()=>{});
+    await del("nights",id);toast("Nuit effacée définitivement");renderJournal();
+  });
+  box.appendChild(sec);
+}
 
 async function refreshHome(){
   const h=new Date().getHours(); $("#greet").textContent=h>=5&&h<12?"Bonjour":h<18&&h>=12?"Prêt pour ce soir":"Prêt pour la nuit";
@@ -771,7 +802,7 @@ async function refreshHome(){
 async function renderJournal(){
   const ns=(await nights()).reverse(); const box=$("#nightList"); box.innerHTML="";
   $("#journalCount").textContent=ns.length?ns.length+" nuit"+(ns.length>1?"s":""):"";
-  if(!ns.length){box.innerHTML="<div class='panel'><p class='muted'>Ton journal se remplira après ta première nuit. Lance l'enregistrement depuis l'onglet Nuit au moment de te coucher.</p></div>";return}
+  if(!ns.length){box.innerHTML="<div class='panel'><p class='muted'>Ton journal se remplira après ta première nuit. Lance l'enregistrement depuis l'onglet Nuit au moment de te coucher.</p></div>";await renderTrash(box);return}
   const asc=ns.slice().reverse();
   for(const n of ns){const sc=nightScore(n,asc),w=sleepWindow(n),co=counts(n.events);
     const b=document.createElement("button");b.className="night";
@@ -779,6 +810,7 @@ async function renderJournal(){
     b.innerHTML=`<div class="score" style="border-color:${col}">${sc.total}</div><div style="min-width:0"><div style="text-transform:capitalize;font-weight:500">${esc(dayLabel(n.start))}</div><div class="muted small num">${hm(n.start)} → ${hm(n.end)} · ${hmm(w.dur)} dormies</div></div>
       <div class="small num" style="text-align:right"><span class="dot d-snore"></span> ${co.ronflement}<br><span class="dot d-talk"></span> ${co.parole}</div>`;
     b.onclick=()=>openNight(n.id); box.appendChild(b);}
+  await renderTrash(box);
 }
 
 function openSheet(html){$("#sheetBody").innerHTML=html;$("#sheet").hidden=false;$("#sheetBody").scrollTop=0}
@@ -869,10 +901,10 @@ async function openNight(id){
       ${binned.length>1?`<button type="button" class="btn sm danger" data-act="emptybin">Effacer maintenant les ${binned.length} écartés</button>`:""}
     </details>`:""}
   </div>
-  <div class="row"><button class="btn danger" id="delNight">Supprimer cette nuit</button></div>`);
+  <div class="row"><button class="btn danger" id="delNight">Mettre cette nuit à la corbeille</button></div>`);
   requestAnimationFrame(()=>drawNight($("#nightCv"),n));
   $("#closeS").onclick=closeSheet; $("#editForm").onclick=()=>openForm(n);
-  const dn=$("#delNight"); dn.onclick=async()=>{if(clips.some(c=>c.fav)){toast("Cette nuit contient un extrait favori : retire d'abord l'étoile pour pouvoir la supprimer");return}if(dn.dataset.armed){await del("nights",id);for(const c of clips)await del("clips",c.id);closeSheet();renderJournal();toast("Nuit supprimée")}else{dn.dataset.armed=1;dn.textContent="Toucher encore pour confirmer"}};
+  const dn=$("#delNight"); dn.onclick=async()=>{if(dn.dataset.armed){n.deleted=Date.now();await put("nights",n);closeSheet();renderJournal();toast("Nuit mise à la corbeille : restaurable "+TRASH_DAYS+" jours en bas du Journal")}else{dn.dataset.armed=1;dn.textContent="Toucher encore pour confirmer"}};
   document.querySelectorAll("#sheetBody audio[data-clip]").forEach(a=>{const c=clipMap[a.dataset.clip];if(c)a.src=URL.createObjectURL(c.blob)});
   const panel=$("#clipPanel"), selected=new Set();
   const plural=(k,w)=>k+" "+w+(k>1?"s":"");
@@ -1439,7 +1471,7 @@ $("#importFile").onchange=async e=>{const f=e.target.files[0];if(!f)return;
 $("#optFilter").onchange=e=>{CFG.vfilter=e.target.value;saveCfg();toast({souple:"Filtre souple",normal:"Filtre normal",strict:"Filtre strict"}[CFG.vfilter]+" : touche « Vérifier tous les extraits » pour l'appliquer aux nuits passées")};
 $("#optKeep").onchange=e=>{CFG.keep=e.target.value;saveCfg();toast(CFG.keep==="parole"?"Seuls les extraits avec de la parole seront gardés":"Tous les extraits seront gardés")};
 $("#reanalyzeAll").onclick=async e=>{const b=e.target;b.disabled=true;let speech=0,total=0;
-  try{const ns=await all("nights");let k=0;for(const n of ns){k++;const cl=await clipsOf(n.id);if(!cl.length)continue;total+=cl.length;
+  try{const ns=(await all("nights")).filter(n=>!n.deleted);let k=0;for(const n of ns){k++;const cl=await clipsOf(n.id);if(!cl.length)continue;total+=cl.length;
       const r=await reanalyzeClips(cl,n,(i,t)=>{b.textContent="Nuit "+k+"/"+ns.length+" · extrait "+i+"/"+t});speech+=r.speech}}
   finally{b.disabled=false;b.textContent="Vérifier tous les extraits"}
   $("#reanalyzeInfo").textContent="Vérification terminée : parole confirmée dans "+speech+" extrait(s) sur "+total+". Tu peux maintenant ne garder que ceux-là.";renderSettings()};
@@ -1713,6 +1745,7 @@ async function recover(){
   await loadCfg(); await recover(); await refreshHome();
   await Sync.init();
   Verify.resume();
+  purgeTrash();
 })();
 </script>
 <script>
