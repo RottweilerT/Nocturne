@@ -2,8 +2,10 @@
 // La page est redemandée au réseau d'abord (pour avoir la dernière version) ;
 // sans réponse rapide ou sans connexion, la copie locale prend le relais.
 // Les données Firebase ne passent pas par ici.
-const CACHE = 'nocturne-v10';
+const CACHE = 'nocturne-v11';
 const CORE = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './firebase-config.js', './night.jpg', './sunset.jpg', './standing.jpg', './apple-touch-icon.png', './vad.js', './silero_vad_16k.safetensors'];
+// Moteur Firebase : mis en cache dès l'installation, pour que l'appli démarre sans réseau même juste après une mise à jour.
+const SDK = ['https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js', 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js', 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js'];
 const EXTERNAL = ['fonts.googleapis.com', 'fonts.gstatic.com'];
 const PAGE = new URL('./index.html', self.registration.scope).href;
 const NET_TIMEOUT = 4000;   // réseau trop lent (réception faible la nuit) : on sert la copie locale
@@ -17,9 +19,11 @@ async function clean(res) {
 
 self.addEventListener('install', e => {
   // Chaque fichier est mis en cache séparément : un échec isolé ne bloque pas l'installation
-  e.waitUntil(caches.open(CACHE).then(c => Promise.all(CORE.map(async u => {
+  // Le moteur Firebase est rangé à part : s'il ne se télécharge pas, l'installation continue quand même.
+  const sdk = c => Promise.all(SDK.map(u => fetch(u, { mode: 'cors', cache: 'reload' }).then(r => r.ok && c.put(u, r)).catch(() => {})));
+  e.waitUntil(caches.open(CACHE).then(c => Promise.all([sdk(c), ...CORE.map(async u => {
     try { const r = await fetch(u, { cache: 'reload' }); if (r.ok) await c.put(u, await clean(r)); } catch (err) {}
-  }))).then(() => self.skipWaiting()));
+  })])).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {
