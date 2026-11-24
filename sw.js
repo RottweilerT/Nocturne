@@ -2,8 +2,8 @@
 // La page est redemandée au réseau d'abord (pour avoir la dernière version) ;
 // sans réponse rapide ou sans connexion, la copie locale prend le relais.
 // Les données Firebase ne passent pas par ici.
-const CACHE = 'nocturne-v11';
-const CORE = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './firebase-config.js', './night.jpg', './sunset.jpg', './standing.jpg', './apple-touch-icon.png', './vad.js', './silero_vad_16k.safetensors'];
+const CACHE = 'nocturne-v12';
+const CORE = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './firebase-config.js', './night.jpg', './sunset.jpg', './standing.jpg', './apple-touch-icon.png', './favicon.ico', './favicon-16.png', './favicon-32.png', './icon-maskable-192.png', './icon-maskable-512.png', './vad.js', './silero_vad_16k.safetensors'];
 // Moteur Firebase : mis en cache dès l'installation, pour que l'appli démarre sans réseau même juste après une mise à jour.
 const SDK = ['https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js', 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js', 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js'];
 const EXTERNAL = ['fonts.googleapis.com', 'fonts.gstatic.com'];
