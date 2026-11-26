@@ -1,0 +1,81 @@
+name: Sauvegarde de la base
+
+# Chaque nuit, copie TOUTE la base Firestore de Nocturne (projet nocturne-rottweilert) :
+# nuits, extraits audio gardés (pas les « écartés ») et réglages, chiffrés en AES-256 avec le secret SAUVEGARDE_CLE.
+# Le dépôt est public : personne ne peut lire la copie sans cette clé.
+# Pour ne pas alourdir le dépôt avec l'audio (modèle Guardian Angel) :
+#   - la copie la plus récente est sur la branche « sauvegardes », qui ne garde qu'UNE version (réécrite à chaque fois) ;
+#   - chaque copie quotidienne est aussi gardée 30 jours comme artefact de l'exécution, puis effacée par GitHub.
+# Une nouvelle copie n'est faite que si la base a changé.
+# Lecture avec le compte de service Firebase (secret FIREBASE_COMPTE_SERVICE). Programme : outils/firestore_sauvegarde.py
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency: sauvegarde
+
+jobs:
+  sauvegarde:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Vérifier les secrets
+        env:
+          CLE: ${{ secrets.SAUVEGARDE_CLE }}
+          COMPTE: ${{ secrets.FIREBASE_COMPTE_SERVICE }}
+        run: |
+          if [ -z "$CLE" ]; then echo "::error::Le secret SAUVEGARDE_CLE manque dans les réglages du dépôt"; exit 1; fi
+          if [ ${#CLE} -lt 20 ]; then echo "::error::Le secret SAUVEGARDE_CLE est trop court (20 caractères minimum)"; exit 1; fi
+          if [ -z "$COMPTE" ]; then echo "::error::Le secret FIREBASE_COMPTE_SERVICE manque dans les réglages du dépôt"; exit 1; fi
+      - name: Lire toute la base
+        env:
+          FIREBASE_COMPTE_SERVICE: ${{ secrets.FIREBASE_COMPTE_SERVICE }}
+        run: python3 outils/firestore_sauvegarde.py lire "$RUNNER_TEMP/base.json"
+      - name: Chiffrer
+        id: chiffre
+        env:
+          CLE: ${{ secrets.SAUVEGARDE_CLE }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/copie"
+          new=$(openssl dgst -sha256 -hmac "$CLE" "$RUNNER_TEMP/base.json" | awk '{print $NF}')
+          old=$(git fetch -q origin sauvegardes 2>/dev/null && git show FETCH_HEAD:empreinte.txt 2>/dev/null || true)
+          echo "jour=$(TZ=Europe/Paris date +%F)" >> "$GITHUB_OUTPUT"
+          if [ "$new" = "$old" ]; then echo "::notice::Base inchangée depuis la dernière sauvegarde"; echo "change=0" >> "$GITHUB_OUTPUT"; rm -f "$RUNNER_TEMP/base.json"; exit 0; fi
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -in "$RUNNER_TEMP/base.json" -out "$RUNNER_TEMP/copie/base.json.enc" -pass env:CLE
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in "$RUNNER_TEMP/copie/base.json.enc" -pass env:CLE | cmp -s - "$RUNNER_TEMP/base.json" \
+            || { echo "::error::La copie chiffrée ne se relit pas correctement : rien n'est enregistré"; exit 1; }
+          echo "$new" > "$RUNNER_TEMP/copie/empreinte.txt"
+          rm -f "$RUNNER_TEMP/base.json"
+          taille=$(stat -c %s "$RUNNER_TEMP/copie/base.json.enc")
+          echo "::notice::Taille de la copie chiffrée : $((taille / 1048576)) Mo"
+          if [ "$taille" -gt 95000000 ]; then echo "::warning::Copie trop grosse pour la branche (limite GitHub 100 Mo) : seule la copie du jour (artefact) est gardée"; echo "grosse=1" >> "$GITHUB_OUTPUT"; fi
+          echo "change=1" >> "$GITHUB_OUTPUT"
+      - name: Garder la copie du jour 30 jours (artefact)
+        if: steps.chiffre.outputs.change == '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sauvegarde-${{ steps.chiffre.outputs.jour }}
+          path: ${{ runner.temp }}/copie/base.json.enc
+          retention-days: 30
+          if-no-files-found: error
+          overwrite: true
+      - name: Remplacer la copie la plus récente (branche « sauvegardes », une seule version)
+        if: steps.chiffre.outputs.change == '1' && steps.chiffre.outputs.grosse != '1'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -q --orphan sauvegardes-nouvelle
+          git rm -rq --cached . 2>/dev/null || true
+          git clean -fdxq
+          cp "$RUNNER_TEMP/copie/base.json.enc" "$RUNNER_TEMP/copie/empreinte.txt" .
+          printf '%s\n' "# Sauvegarde chiffrée de la base Firestore de Nocturne" "" \
+            "Copie la plus récente uniquement (cette branche est réécrite à chaque sauvegarde). Chiffrement AES-256-CBC, PBKDF2 200 000 itérations, clé : secret SAUVEGARDE_CLE." \
+            "Copies des 30 derniers jours : artefacts des exécutions « Sauvegarde de la base ». Ne pas fusionner cette branche dans main." > LISEZMOI.md
+          git add base.json.enc empreinte.txt LISEZMOI.md
+          git commit -qm "Sauvegarde chiffrée de la base ($(TZ=Europe/Paris date '+%F %H:%M'))"
+          git push -qf origin HEAD:refs/heads/sauvegardes
+          echo "::notice::Sauvegarde enregistrée (branche sauvegardes + copie du jour gardée 30 jours)"

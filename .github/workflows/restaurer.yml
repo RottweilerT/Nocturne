@@ -1,0 +1,48 @@
+name: Restaurer la base
+
+# Remet dans Firebase (projet nocturne-rottweilert) le contenu de la sauvegarde chiffrée la plus récente
+# (branche « sauvegardes »). Chaque document de la sauvegarde est réécrit tel qu'il était ;
+# les documents créés depuis ne sont pas effacés.
+# « Partie à restaurer » permet de ne remettre qu'un morceau, par exemple users/<identifiant>/nights. Vide = toute la base.
+# Pour une copie plus ancienne : télécharger l'artefact du jour voulu (exécutions « Sauvegarde de la base »).
+# À lancer à la main : onglet Actions → « Restaurer la base » → Run workflow. Conseil : « Vérifier la sauvegarde » d'abord.
+on:
+  workflow_dispatch:
+    inputs:
+      partie:
+        description: "Partie à restaurer, ex. users/<identifiant>/nights (laisser vide = toute la base)"
+        required: false
+        default: ""
+      confirmer:
+        description: "Tape RESTAURER pour confirmer"
+        required: true
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency: sauvegarde
+
+jobs:
+  restaurer:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.confirmer == 'RESTAURER' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Déchiffrer la sauvegarde
+        env:
+          CLE: ${{ secrets.SAUVEGARDE_CLE }}
+        run: |
+          if [ -z "$CLE" ]; then echo "::error::Le secret SAUVEGARDE_CLE manque dans les réglages du dépôt"; exit 1; fi
+          git fetch -q origin sauvegardes && git show FETCH_HEAD:base.json.enc > /tmp/base.enc \
+            || { echo "::error::Aucune sauvegarde trouvée sur la branche sauvegardes"; exit 1; }
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in /tmp/base.enc -out /tmp/base.json -pass env:CLE \
+            || { echo "::error::Déchiffrement impossible : mauvaise clé SAUVEGARDE_CLE"; exit 1; }
+      - name: Réécrire les documents
+        env:
+          FIREBASE_COMPTE_SERVICE: ${{ secrets.FIREBASE_COMPTE_SERVICE }}
+          PARTIE: ${{ github.event.inputs.partie }}
+        run: python3 outils/firestore_sauvegarde.py restaurer /tmp/base.json "$PARTIE"
+      - name: Effacer les fichiers temporaires
+        if: always()
+        run: rm -f /tmp/base.json /tmp/base.enc

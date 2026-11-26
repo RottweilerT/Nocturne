@@ -1,0 +1,39 @@
+name: Vérifier la sauvegarde
+
+# Test SANS RISQUE de la sauvegarde : rien n'est écrit dans Firebase ni dans le dépôt.
+# 1. Déchiffre la copie la plus récente (branche « sauvegardes ») avec le secret SAUVEGARDE_CLE.
+# 2. Vérifie que le contenu est complet et au bon format pour « Restaurer la base ».
+# 3. Compare avec la base actuelle (lecture seule) : documents identiques, modifiés depuis, nouveaux, disparus.
+# 4. Vérifie que les nuits ne sont pas lisibles sans connexion.
+# Le journal n'affiche que des nombres (le dépôt est public).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verifier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Déchiffrer la sauvegarde
+        env:
+          CLE: ${{ secrets.SAUVEGARDE_CLE }}
+        run: |
+          if [ -z "$CLE" ]; then echo "::error::Le secret SAUVEGARDE_CLE manque dans les réglages du dépôt"; exit 1; fi
+          git fetch -q origin sauvegardes 2>/dev/null && git show FETCH_HEAD:base.json.enc > /tmp/base.enc \
+            || { echo "::error::Aucune sauvegarde pour l'instant : lance d'abord « Sauvegarde de la base »"; exit 1; }
+          if ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in /tmp/base.enc -out /tmp/base.json -pass env:CLE 2>/dev/null; then
+            echo "::error::Déchiffrement impossible : la clé SAUVEGARDE_CLE ne correspond pas à celle qui a chiffré cette sauvegarde"; exit 1
+          fi
+          echo "::notice::Déchiffrement réussi : la clé est la bonne"
+      - name: Contrôler la sauvegarde et la comparer à la base (lecture seule)
+        env:
+          FIREBASE_COMPTE_SERVICE: ${{ secrets.FIREBASE_COMPTE_SERVICE }}
+        run: |
+          export CLE_WEB=$(grep -o 'apiKey: *"[^"]*"' firebase-config.js | head -1 | cut -d'"' -f2)
+          python3 outils/firestore_sauvegarde.py verifier /tmp/base.json
+      - name: Effacer les fichiers temporaires
+        if: always()
+        run: rm -f /tmp/base.json /tmp/base.enc
